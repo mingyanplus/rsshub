@@ -1,0 +1,90 @@
+name: Release
+
+# 仅在推送新版本标签（v*）时触发：编译多平台二进制 + 构建推送 Docker 镜像
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write      # 创建 GitHub Release 并上传二进制
+  packages: write      # 推送镜像到 GHCR
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ── 多平台二进制编译 + Release ─────────────────────────
+  binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, ext: ""      }
+          - { goos: linux,   goarch: arm64, ext: ""      }
+          - { goos: windows, goarch: amd64, ext: ".exe"  }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist/rss-ai-${{ matrix.goos }}-${{ matrix.goarch }}
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME} -X main.gitCommit=${GITHUB_SHA} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o dist/rss-ai-${{ matrix.goos }}-${{ matrix.goarch }}/rss-ai${{ matrix.ext }} ./cmd/server
+          # 二进制运行需要模板与示例配置，一并打包
+          cp -r web config.example.yaml dist/rss-ai-${{ matrix.goos }}-${{ matrix.goarch }}/
+
+      - name: Package (tar / zip)
+        run: |
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a rss-ai-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}.zip rss-ai-${{ matrix.goos }}-${{ matrix.goarch }}
+          else
+            tar -czf rss-ai-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz rss-ai-${{ matrix.goos }}-${{ matrix.goarch }}
+          fi
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/rss-ai-${{ github.ref_name }}-*
+
+  # ── Docker 镜像构建（amd64 + arm64）→ GHCR ────────────
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

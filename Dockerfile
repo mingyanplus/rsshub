@@ -1,0 +1,36 @@
+# 多阶段构建：纯 Go SQLite（modernc），无需 CGO
+FROM golang:1.25-alpine AS builder
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.gitCommit=${COMMIT} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o /out/rss-ai ./cmd/server
+
+# 运行时镜像
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S app && adduser -S app -G app
+
+WORKDIR /app
+COPY --from=builder /out/rss-ai ./rss-ai
+COPY web ./web
+COPY config.example.yaml ./config.example.yaml
+
+# 数据目录（SQLite 数据库与运行配置）
+RUN mkdir -p /data && chown -R app:app /data /app
+VOLUME /data
+USER app
+
+ENV TZ=Asia/Shanghai
+EXPOSE 8080
+
+# 首次启动若 /data/config.yaml 不存在则复制示例配置
+CMD ["sh", "-c", "[ -f /data/config.yaml ] || cp /app/config.example.yaml /data/config.yaml; exec /app/rss-ai -config /data/config.yaml"]
