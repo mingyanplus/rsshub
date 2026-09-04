@@ -1,0 +1,122 @@
+{{template "layout" .}}
+{{define "content"}}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- 主栏：话题流 -->
+    <div class="lg:col-span-2 space-y-4">
+        <!-- 频道筛选 -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-3 flex items-center gap-2 flex-wrap">
+            <a href="/topics"
+               class="px-3 py-1 rounded-lg text-sm {{if eq .SelectedCategory ""}}bg-blue-500 text-white{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}">全部</a>
+            {{range .TopicCategories}}
+            <a href="/topics?category={{.}}"
+               class="px-3 py-1 rounded-lg text-sm {{if eq $.SelectedCategory .}}bg-blue-500 text-white{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}">{{.}}</a>
+            {{end}}
+            <button onclick="rebuildTopics(this)"
+                    class="ml-auto text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 transition disabled:opacity-50">
+                🤖 从近 30 天文章重建话题
+            </button>
+        </div>
+
+        <!-- 话题卡片 -->
+        {{range .TopicList}}
+        <article class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+            <div class="flex items-start justify-between gap-3">
+                <a href="/topics/{{.ID}}" class="text-lg font-semibold text-gray-900 hover:text-blue-600 hover:underline decoration-gray-300 underline-offset-4 leading-snug">{{.Title}}</a>
+                <span class="flex-shrink-0 text-xs text-gray-400 mt-1.5 tabular-nums tracking-wide">{{reltime .LastUpdatedAt}}</span>
+            </div>
+            <div class="flex items-center gap-2 mt-2.5 text-xs flex-wrap">
+                {{if .Category}}
+                <span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded">{{.Category}}</span>
+                {{end}}
+                <span class="text-gray-400 tabular-nums">{{.SourceCount}} 个来源 · {{.ArticleCount}} 篇报道</span>
+                <span class="text-orange-500 tabular-nums ml-auto font-mono text-xs">🔥 {{.HeatScore}}</span>
+            </div>
+            {{if .AISummary}}
+            <p class="text-[15px] text-gray-600 mt-3.5 leading-7">{{.AISummary}}</p>
+            {{end}}
+            {{if .LatestArticles}}
+            <div class="mt-3.5 space-y-2 border-l border-gray-200 pl-4">
+                {{range .LatestArticles}}
+                <a href="{{.Link}}" target="_blank" rel="noopener" class="flex items-baseline gap-2 group">
+                    <span class="text-sm text-gray-700 group-hover:text-blue-600 flex-1 truncate">{{.Title}}</span>
+                    <span class="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">{{.FeedTitle}}{{if .PublishedAt}} · {{reltime .PublishedAt}}{{end}}</span>
+                </a>
+                {{end}}
+            </div>
+            {{end}}
+        </article>
+        {{else}}
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center text-gray-400">
+            <div class="text-4xl mb-3">🔥</div>
+            <p>暂无话题</p>
+            <p class="text-sm mt-1">文章经 AI 分析后会自动聚合为话题，多源报道将合并为同一话题</p>
+        </div>
+        {{end}}
+
+        <!-- 分页 -->
+        {{if or .HasPrev .HasNext}}
+        <div class="flex items-center justify-center gap-6 bg-white rounded-xl shadow-sm border border-gray-100 py-3 text-sm">
+            {{if .HasPrev}}
+            <a href="/topics?page={{.PrevPage}}{{if .SelectedCategory}}&category={{.SelectedCategory}}{{end}}" class="text-blue-500 hover:underline">← 上一页</a>
+            {{else}}
+            <span class="text-gray-300">← 上一页</span>
+            {{end}}
+            <span class="text-gray-400 tabular-nums">第 {{.CurrentPage}} 页</span>
+            {{if .HasNext}}
+            <a href="/topics?page={{.NextPage}}{{if .SelectedCategory}}&category={{.SelectedCategory}}{{end}}" class="text-blue-500 hover:underline">下一页 →</a>
+            {{else}}
+            <span class="text-gray-300">下一页 →</span>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+
+    <!-- 侧栏 -->
+    <div class="space-y-4">
+        <!-- 24 小时热榜 -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+            <div class="p-4 border-b border-gray-100 font-semibold text-gray-800 flex items-center gap-2">
+                <svg class="w-4 h-4 text-orange-500" aria-hidden="true"><use href="#i-fire"/></svg> 24 小时热榜
+            </div>
+            <div class="p-2 space-y-0.5">
+                {{range $i, $t := .HotTopics24h}}
+                <a href="/topics/{{$t.ID}}" class="flex items-start gap-2.5 px-2 py-2.5 hover:bg-gray-50 rounded-lg transition">
+                    <span class="text-sm font-bold w-6 flex-shrink-0 text-center font-mono tabular-nums {{if lt $i 3}}text-orange-500{{else}}text-gray-300{{end}}">{{add $i 1}}</span>
+                    <span class="text-sm text-gray-700 leading-snug">{{$t.Title}}</span>
+                </a>
+                {{else}}
+                <p class="text-sm text-gray-400 text-center py-4">暂无数据</p>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- 说明卡片 -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-xs text-gray-400 leading-relaxed">
+            <p class="font-medium text-gray-500 mb-1">关于话题流</p>
+            <p>同一事件的多篇报道会自动聚合为一个话题，并生成综合摘要；点击标题可查看全部相关新闻与该话题主体的历史时间线。</p>
+        </div>
+    </div>
+</div>
+
+<script>
+// 从存量文章重建话题（异步，需数分钟）
+async function rebuildTopics(btn) {
+    if (!confirm('将清空现有话题，从近 30 天已分析的文章重新聚合（多源话题会调用 AI 生成综合摘要，可能产生少量 API 费用）。确定继续？')) return;
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '⏳ 重建中，完成后刷新页面查看…';
+    try {
+        const res = await fetch('/api/topics/rebuild?days=30', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        alert(`已开始重建，共 ${data.articles} 篇文章。聚合在后台进行，稍后刷新本页查看话题流。`);
+        setTimeout(() => location.reload(), 15000);
+    } catch (err) {
+        alert('重建失败：' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+    }
+}
+</script>
+{{end}}

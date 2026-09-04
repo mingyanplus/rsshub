@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - RSS AI Reader</title>
+    <script src="/static/js/tailwind.min.js"></script>
+    <script src="/static/js/htmx.min.js"></script>
+    <script>
+        // 报纸编辑风 tokens（提取自 ai-digest.liziran.com）：
+        // 品牌绿 #1a6b3c 承担原 blue 全阶；赤陶 #b87848 承担原 orange 全阶；
+        // gray/slate 暖纸灰化；indigo/green 对齐绿系，避免第二主色。
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1a6b3c',
+                        sidebar: '#ffffff',
+                        blue: {
+                            50: '#f0f7f2', 100: '#dcebe2', 200: '#b7d5c4', 300: '#8ab8a0',
+                            400: '#528f74', 500: '#1a6b3c', 600: '#175a33', 700: '#134a2b',
+                            800: '#0f3a22', 900: '#0b2a19',
+                        },
+                        orange: {
+                            50: '#faf3ee', 100: '#f2e2d4', 200: '#e5c3a8', 300: '#d5a37d',
+                            400: '#c98d62', 500: '#b87848', 600: '#9d6339', 700: '#7d4e2d',
+                            800: '#5e3a21', 900: '#3f2716',
+                        },
+                        gray: {
+                            50: '#fafafa', 100: '#f4f3f1', 200: '#e8e6e2', 300: '#d6d3cd',
+                            400: '#a8a29a', 500: '#78716c', 600: '#57534e', 700: '#3f3a36',
+                            800: '#292524', 900: '#1c1b19',
+                        },
+                        slate: {
+                            50: '#fafafa', 100: '#f4f3f1', 200: '#e8e6e2', 300: '#d6d3cd',
+                            400: '#a8a29a', 500: '#78716c', 600: '#57534e', 700: '#4a453f',
+                            800: '#38332e', 900: '#292524',
+                        },
+                        indigo: {
+                            50: '#f0f7f2', 100: '#dcebe2', 200: '#b7d5c4', 300: '#8ab8a0',
+                            400: '#3a8a5f', 500: '#134a2b', 600: '#0f3a22', 700: '#0b2a19',
+                            800: '#082013', 900: '#05170e',
+                        },
+                        green: {
+                            50: '#f0f7f2', 100: '#dcebe2', 200: '#b7d5c4', 300: '#8ab8a0',
+                            400: '#35935f', 500: '#1a6b3c', 600: '#175a33', 700: '#134a2b',
+                            800: '#0f3a22', 900: '#0b2a19',
+                        },
+                    },
+                    fontFamily: {
+                        // 中文字体组合参考 zenozeng/fonts.css（跨平台黑体/宋体栈，覆盖 Win/Mac/Linux）
+                        sans: ['system-ui', '-apple-system', 'Segoe UI', 'Helvetica Neue', 'Helvetica', 'Arial',
+                               'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Source Han Sans CN',
+                               'Microsoft YaHei', 'Wenquanyi Micro Hei', 'WenQuanYi Zen Hei', 'ST Heiti', 'SimHei', 'sans-serif'],
+                        serif: ['Georgia', 'Nimbus Roman No9 L', 'Songti SC', 'Noto Serif SC',
+                                'Noto Serif CJK SC', 'Source Han Serif SC', 'Source Han Serif CN',
+                                'STSong', 'NSimSun', 'SimSun', 'AR PL UMing CN', 'PMingLiU', 'MingLiU', 'serif'],
+                        mono: ['JetBrains Mono', 'Consolas', 'Courier New', 'monospace'],
+                    },
+                    // 报纸近直角
+                    borderRadius: {
+                        none: '0', sm: '2px', DEFAULT: '2px', md: '2px', lg: '2px',
+                        xl: '2px', '2xl': '4px', '3xl': '4px', full: '9999px',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { text-rendering: optimizeLegibility; }
+        /* 报纸风：标题宋体、数字等宽（组合参考 zenozeng/fonts.css 的 font-song） */
+        h1, h2, h3, .font-serif {
+            font-family: Georgia, 'Nimbus Roman No9 L', 'Songti SC', 'Noto Serif SC',
+                'Noto Serif CJK SC', 'Source Han Serif SC', 'Source Han Serif CN',
+                'STSong', 'NSimSun', 'SimSun', 'AR PL UMing CN', 'PMingLiU', 'MingLiU', serif;
+        }
+        ::selection { background: rgba(26, 107, 60, .16); }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d6d3cd; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a29a; }
+        .htmx-request .htmx-indicator { display: inline-block; }
+        .htmx-request .htmx-hidden { display: none; }
+        .sidebar-link.active {
+            background-color: #f0f7f2;
+            color: #1a6b3c;
+            font-weight: 600;
+        }
+        /* 预览内容中的链接样式 */
+        .prose a {
+            text-decoration: underline;
+            color: #1a6b3c;
+        }
+        .prose a:hover {
+            color: #0f3a22;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans antialiased">
+    <!-- 单色图标集（outline 风格，currentColor 跟随文字颜色） -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+        <defs>
+            <symbol id="i-newspaper" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V18.75a2.625 2.625 0 01-2.625 2.625h-.75A2.625 2.625 0 0113.5 18.75V7.875c0-.621.504-1.125 1.125-1.125zM3 19.125v-.75A2.625 2.625 0 015.625 15h3.75a2.625 2.625 0 012.625 2.625v.75m-9 0h9"/></symbol>
+            <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></symbol>
+            <symbol id="i-fire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/><path d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1.001A3.75 3.75 0 0012 18z"/></symbol>
+            <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></symbol>
+            <symbol id="i-document" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></symbol>
+            <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"/></symbol>
+            <symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z"/><path d="M6 6h.008v.008H6V6z"/></symbol>
+            <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.563.563 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"/></symbol>
+            <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></symbol>
+            <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></symbol>
+            <symbol id="i-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></symbol>
+            <symbol id="i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></symbol>
+            <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></symbol>
+            <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></symbol>
+        </defs>
+    </svg>
+    <div class="flex min-h-screen">
+        <!-- 侧边栏 -->
+        <aside id="sidebar" class="w-64 bg-sidebar border-r border-gray-200 flex-shrink-0 fixed left-0 top-0 h-full z-30 -translate-x-full lg:translate-x-0 transition-transform duration-200 flex flex-col">
+            <div class="p-4 border-b border-gray-200">
+                <h1 class="text-xl font-bold text-[#1a6b3c] tracking-wide flex items-center gap-2"><svg class="w-6 h-6" aria-hidden="true"><use href="#i-newspaper"/></svg>RSS AI Reader</h1>
+                <p class="text-xs text-gray-400 mt-0.5 tracking-widest">读报 · 不炸裂</p>
+            </div>
+
+            <nav class="p-3 space-y-1 flex-1 overflow-y-auto">
+                <div class="text-xs text-gray-400 tracking-widest px-3 py-2">主菜单</div>
+
+                <a href="/" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "dashboard"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-chart"/></svg> 仪表盘
+                </a>
+
+                <a href="/topics" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "topics"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-fire"/></svg> 话题流
+                </a>
+
+                <a href="/articles" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "articles"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-document"/></svg> 文章列表
+                </a>
+
+                <a href="/feeds" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "feeds"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-inbox"/></svg> 订阅管理
+                </a>
+
+                <div class="text-xs text-gray-400 tracking-widest px-3 py-2 mt-4">分类浏览</div>
+
+                <a href="/categories" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "categories"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-folder"/></svg> 分类管理
+                </a>
+
+                <a href="/tags" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "tags"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-tag"/></svg> 标签管理
+                </a>
+
+                <div class="text-xs text-gray-400 tracking-widest px-3 py-2 mt-4">AI 功能</div>
+
+                <a href="/rules" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "rules"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-star"/></svg> 关注规则
+                </a>
+
+                <a href="/reports" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "reports"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-newspaper"/></svg> 早晚报/日报
+                </a>
+
+                <a href="/events" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "events"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-search"/></svg> 事件追踪
+                </a>
+
+                <div class="text-xs text-gray-400 tracking-widest px-3 py-2 mt-4">系统</div>
+
+                <a href="/settings" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "settings"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-cog"/></svg> 设置
+                </a>
+
+                <a href="/data" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "data"}}active{{end}}">
+                    <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-database"/></svg> 数据管理
+                </a>
+            </nav>
+
+            <!-- 底部状态 -->
+            <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-white">
+                <div class="flex items-center gap-2 text-sm text-gray-500">
+                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                    <span>服务运行中</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 lg:ml-64 min-w-0">
+            <!-- 顶部栏 -->
+            <header class="bg-white px-4 lg:px-6 py-4 sticky top-0 z-20" style="border-bottom: 2px solid #1a6b3c;">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <button id="sidebar-toggle" aria-label="打开菜单" class="lg:hidden p-2 -ml-2 text-gray-500 hover:text-gray-700 rounded-lg">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                            </svg>
+                        </button>
+                        <h2 class="text-lg lg:text-xl font-semibold text-gray-900 truncate flex items-center gap-2">
+                            {{if eq .Active "dashboard"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-chart"/></svg>
+                            {{else if eq .Active "topics"}}<svg class="w-5 h-5 text-orange-500 flex-shrink-0" aria-hidden="true"><use href="#i-fire"/></svg>
+                            {{else if eq .Active "feeds"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-inbox"/></svg>
+                            {{else if eq .Active "articles"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-document"/></svg>
+                            {{else if eq .Active "categories"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-folder"/></svg>
+                            {{else if eq .Active "tags"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-tag"/></svg>
+                            {{else if eq .Active "rules"}}<svg class="w-5 h-5 text-orange-500 flex-shrink-0" aria-hidden="true"><use href="#i-star"/></svg>
+                            {{else if eq .Active "reports"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-newspaper"/></svg>
+                            {{else if eq .Active "events"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-search"/></svg>
+                            {{else if eq .Active "settings"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-cog"/></svg>
+                            {{else if eq .Active "data"}}<svg class="w-5 h-5 text-[#1a6b3c] flex-shrink-0" aria-hidden="true"><use href="#i-database"/></svg>
+                            {{else if eq .Active "followed"}}<svg class="w-5 h-5 text-orange-500 flex-shrink-0" aria-hidden="true"><use href="#i-star"/></svg>
+                            {{end}}
+                            <span class="truncate">{{.PageTitle}}</span>
+                        </h2>
+                    </div>
+                </div>
+            </header>
+
+            <!-- 页面内容 -->
+            <div class="p-6">
+                {{template "content" .}}
+            </div>
+        </main>
+    </div>
+
+    <!-- 全局通知区域 -->
+    <div id="global-toast" class="fixed bottom-4 right-4 z-50"></div>
+
+    <script>
+        // 移动端侧边栏切换
+        const sidebar = document.getElementById('sidebar');
+        document.getElementById('sidebar-toggle').addEventListener('click', () => {
+            sidebar.classList.toggle('-translate-x-full');
+        });
+        // 移动端点击导航后自动收起侧边栏
+        sidebar.querySelectorAll('a[href]').forEach(link => {
+            link.addEventListener('click', () => sidebar.classList.add('-translate-x-full'));
+        });
+
+        // 侧边栏激活状态
+        const currentPath = window.location.pathname;
+        document.querySelectorAll('.sidebar-link').forEach(link => {
+            if (link.getAttribute('href') === currentPath) {
+                link.classList.add('active');
+            }
+        });
+
+        // htmx 配置
+        document.body.addEventListener('htmx:configRequest', function(evt) {
+            evt.detail.headers['X-Request-With'] = 'XMLHttpRequest';
+        });
+
+        // 显示通知
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('global-toast');
+            const colors = {
+                success: 'bg-green-500',
+                error: 'bg-red-500',
+                warning: 'bg-yellow-500',
+                info: 'bg-blue-500'
+            };
+            toast.innerHTML = `
+                <div class="${colors[type]} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
+                    <span>${message}</span>
+                </div>
+            `;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3000);
+        }
+
+        // 外部链接在新窗口打开
+        function setExternalLinksTarget() {
+            const currentHost = window.location.host;
+            document.querySelectorAll('a[href]').forEach(link => {
+                const href = link.getAttribute('href');
+                // 跳过已经有 target 的链接、空链接、锚点链接、javascript 链接
+                if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+                if (link.hasAttribute('target')) return;
+
+                // 检查是否是外部链接
+                try {
+                    const url = new URL(href, window.location.origin);
+                    if (url.host !== currentHost) {
+                        link.setAttribute('target', '_blank');
+                        link.setAttribute('rel', 'noopener noreferrer');
+                    }
+                } catch (e) {
+                    // URL 解析失败，忽略
+                }
+            });
+        }
+
+        // 初始化时处理
+        setExternalLinksTarget();
+
+        // 监听 DOM 变化，处理动态加载的内容
+        const linkObserver = new MutationObserver(() => {
+            setExternalLinksTarget();
+        });
+        linkObserver.observe(document.body, { childList: true, subtree: true });
+    </script>
+</body>
+</html>

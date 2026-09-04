@@ -1,0 +1,368 @@
+{{define "content"}}
+<div class="space-y-6">
+    <!-- 操作栏 -->
+    <div class="flex justify-end">
+        <button hx-post="/api/settings"
+                hx-include="#settings-form"
+                hx-target="#settings-status"
+                class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">
+            💾 保存设置
+        </button>
+    </div>
+
+    <div id="settings-status"></div>
+
+    <!-- 设置表单 -->
+    <div id="settings-form">
+    <!-- AI 设置 -->
+    <div class="bg-white rounded-xl shadow-sm">
+        <div class="p-4 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-800"><svg class="w-5 h-5 inline-block align-[-4px] text-gray-500" aria-hidden="true"><use href="#i-cog"/></svg> AI 配置</h2>
+        </div>
+        <div class="p-6 space-y-5">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-2">
+                <span class="text-sm font-medium text-gray-700">对话模型（LLM）</span>
+                <div class="flex items-center gap-2">
+                    <span id="test-status-llm" class="text-xs"></span>
+                    <button type="button" onclick="testConnection('llm', this)"
+                            class="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50">🔌 测试连接</button>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">LLM API 地址</label>
+                <input type="text"
+                       name="llm_base_url"
+                       value="{{.Settings.LLMBaseURL}}"
+                       placeholder="https://api.openai.com/v1"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">LLM 模型</label>
+                <input type="text"
+                       name="llm_model"
+                       value="{{.Settings.LLMModel}}"
+                       placeholder="gpt-4o-mini"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">LLM API Key</label>
+                <input type="password"
+                       name="llm_api_key"
+                       value="{{.Settings.LLMAPIKey}}"
+                       placeholder="sk-..."
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex items-center justify-between border-b border-gray-100 pb-2 pt-2">
+                <span class="text-sm font-medium text-gray-700">向量模型（Embedding）</span>
+                <div class="flex items-center gap-2">
+                    <span id="test-status-embedding" class="text-xs"></span>
+                    <button type="button" onclick="testConnection('embedding', this)"
+                            class="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50">🔌 测试连接</button>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Embedding API 地址</label>
+                <input type="text"
+                       name="embedding_base_url"
+                       value="{{.Settings.EmbeddingBaseURL}}"
+                       placeholder="https://api.openai.com/v1"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Embedding 模型</label>
+                <input type="text"
+                       name="embedding_model"
+                       value="{{.Settings.EmbeddingModel}}"
+                       placeholder="text-embedding-3-small"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Embedding API Key</label>
+                <input type="password"
+                       name="embedding_api_key"
+                       value="{{.Settings.EmbeddingAPIKey}}"
+                       placeholder="sk-..."
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            </div>
+        </div>
+    </div>
+
+    <!-- 代理设置 -->
+    <div class="bg-white rounded-xl shadow-sm">
+        <div class="p-4 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-800"><svg class="w-5 h-5 inline-block align-[-4px] text-gray-500" aria-hidden="true"><use href="#i-globe"/></svg> 代理设置</h2>
+        </div>
+        <div class="p-6 space-y-4">
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-medium text-gray-700">代理地址</label>
+                    <div class="flex items-center gap-2">
+                        <span id="test-status-proxy" class="text-xs"></span>
+                        <button type="button" onclick="testConnection('proxy', this)"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50">测试连接</button>
+                    </div>
+                </div>
+                <input type="text"
+                       name="proxy_url"
+                       value="{{.Settings.ProxyURL}}"
+                       placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+            </div>
+            <div class="space-y-2.5">
+                <label class="flex items-center gap-2.5 cursor-pointer">
+                    <input type="checkbox"
+                           name="proxy_enable_content"
+                           {{if .Settings.ProxyEnableContent}}checked{{end}}
+                           class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm text-gray-700">内容抓取走代理 <span class="text-gray-400 text-xs">（RSS 订阅刷新、获取原文）</span></span>
+                </label>
+                <label class="flex items-center gap-2.5 cursor-pointer">
+                    <input type="checkbox"
+                           name="proxy_enable_llm"
+                           {{if .Settings.ProxyEnableLLM}}checked{{end}}
+                           class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm text-gray-700">LLM / Embedding 接口走代理</span>
+                </label>
+            </div>
+            <p class="text-xs text-gray-400 leading-relaxed">保存后立即生效，无需重启；两个通道可独立启停。支持 http:// 与 socks5:// 协议。</p>
+        </div>
+    </div>
+
+    <!-- 推送设置 -->
+    <div class="bg-white rounded-xl shadow-sm">
+        <div class="p-4 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-800"><svg class="w-5 h-5 inline-block align-[-4px] text-gray-500" aria-hidden="true"><use href="#i-bell"/></svg> 推送设置</h2>
+        </div>
+        <div class="p-6 space-y-4">
+            <!-- Gotify -->
+            <div class="border border-gray-200 rounded-lg p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div class="font-medium text-gray-900">Gotify</div>
+                        <div class="text-sm text-gray-500">推送消息到 Gotify 服务器</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="test-status-gotify" class="text-xs"></span>
+                        <button type="button" onclick="testConnection('gotify', this)"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50">发送测试</button>
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Gotify URL</label>
+                        <input type="url"
+                               name="gotify_url"
+                               value="{{.Settings.GotifyURL}}"
+                               placeholder="https://gotify.example.com"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Gotify Token</label>
+                        <input type="password"
+                               name="gotify_token"
+                               value="{{.Settings.GotifyToken}}"
+                               placeholder="应用 Token"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Email -->
+            <div class="border border-gray-200 rounded-lg p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div class="font-medium text-gray-900">邮件</div>
+                        <div class="text-sm text-gray-500">发送邮件通知</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="test-status-email" class="text-xs"></span>
+                        <button type="button" onclick="testConnection('email', this)"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50">发送测试</button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">SMTP 服务器</label>
+                        <input type="text"
+                               name="smtp_host"
+                               value="{{.Settings.SMTPHost}}"
+                               placeholder="smtp.example.com"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">SMTP 端口</label>
+                        <input type="number"
+                               name="smtp_port"
+                               value="{{.Settings.SMTPPort}}"
+                               placeholder="587"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">发件人邮箱</label>
+                        <input type="email"
+                               name="smtp_username"
+                               value="{{.Settings.SMTPUsername}}"
+                               placeholder="noreply@example.com"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">邮箱密码</label>
+                        <input type="password"
+                               name="smtp_password"
+                               value="{{.Settings.SMTPPassword}}"
+                               placeholder="••••••••"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- QQ Bot -->
+            <div class="border border-gray-200 rounded-lg p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div class="font-medium text-gray-900">QQ Bot</div>
+                        <div class="text-sm text-gray-500">推送到 QQ 频道</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="test-status-qqbot" class="text-xs"></span>
+                        <button type="button" onclick="testConnection('qqbot', this)"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50">发送测试</button>
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">App ID</label>
+                        <input type="text"
+                               name="qqbot_app_id"
+                               value="{{.Settings.QQBotAppID}}"
+                               placeholder="QQ Bot App ID"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">App Secret</label>
+                        <input type="password"
+                               name="qqbot_app_secret"
+                               value="{{.Settings.QQBotAppSecret}}"
+                               placeholder="QQ Bot Secret"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">接收用户 ID</label>
+                        <input type="text"
+                               name="qqbot_user_id"
+                               value="{{.Settings.QQBotUserID}}"
+                               placeholder="QQ 用户 ID"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Webhook -->
+            <div class="border border-gray-200 rounded-lg p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div class="font-medium text-gray-900">Webhook</div>
+                        <div class="text-sm text-gray-500">发送 HTTP 请求</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="test-status-webhook" class="text-xs"></span>
+                        <button type="button" onclick="testConnection('webhook', this)"
+                                class="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50">发送测试</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Webhook URL</label>
+                    <input type="url"
+                           name="webhook_url"
+                           value="{{.Settings.WebhookURL}}"
+                           placeholder="https://webhook.example.com/push"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 定时任务 -->
+    <div class="bg-white rounded-xl shadow-sm">
+        <div class="p-4 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-800"><svg class="w-5 h-5 inline-block align-[-4px] text-gray-500" aria-hidden="true"><use href="#i-clock"/></svg> 定时任务</h2>
+        </div>
+        <div class="p-6">
+            <div class="grid grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">🌅 早报时间</label>
+                    <input type="time"
+                           name="morning_report_time"
+                           value="{{.Settings.MorningReportTime}}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">🌙 晚报时间</label>
+                    <input type="time"
+                           name="evening_report_time"
+                           value="{{.Settings.EveningReportTime}}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">📅 日报时间</label>
+                    <input type="time"
+                           name="daily_report_time"
+                           value="{{.Settings.DailyReportTime}}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+        </div>
+    </div>
+    </div><!-- end #settings-form -->
+</div>
+
+<script>
+// 测试连接：用表单当前值（未保存的草稿也可测）
+async function testConnection(type, btn) {
+    const fieldsByType = {
+        llm: ['llm_base_url', 'llm_model', 'llm_api_key'],
+        embedding: ['embedding_base_url', 'embedding_model', 'embedding_api_key'],
+        gotify: ['gotify_url', 'gotify_token'],
+        email: ['smtp_host', 'smtp_port', 'smtp_username', 'smtp_password'],
+        qqbot: ['qqbot_app_id', 'qqbot_app_secret', 'qqbot_user_id'],
+        webhook: ['webhook_url'],
+        proxy: ['proxy_url'],
+    };
+    const status = document.getElementById('test-status-' + type);
+    const payload = { type };
+    (fieldsByType[type] || []).forEach(name => {
+        const el = document.querySelector('#settings-form [name="' + name + '"]');
+        payload[name] = el ? el.value.trim() : '';
+    });
+
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ 测试中…';
+    status.textContent = '';
+    status.className = 'text-xs text-gray-400';
+
+    try {
+        const res = await fetch('/api/settings/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.success) {
+            status.textContent = '✓ ' + data.message + '（' + data.latency_ms + ' ms）';
+            status.className = 'text-xs text-green-600';
+        } else {
+            status.textContent = '✗ ' + data.message;
+            status.className = 'text-xs text-red-500';
+        }
+    } catch (err) {
+        status.textContent = '✗ 请求失败: ' + err.message;
+        status.className = 'text-xs text-red-500';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+    }
+}
+</script>
+{{end}}

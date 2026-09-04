@@ -1,0 +1,530 @@
+{{define "content"}}
+<style>
+/* 文章卡片悬停浮动效果 */
+.article-card {
+    position: relative;
+    z-index: 1;
+    break-inside: avoid;
+}
+/* 悬停时提升层级 */
+.article-card:hover {
+    z-index: 50;
+}
+/* 悬停浮动层 - 默认隐藏（报纸风：直角、绿描边、克制阴影） */
+.article-card .hover-expand {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    background: white;
+    border-radius: 2px;
+    box-shadow: 0 4px 16px rgba(28, 27, 25, 0.12), 0 1px 3px rgba(28, 27, 25, 0.08);
+    padding: 12px;
+    z-index: 100;
+    border: 1px solid #b7d5c4;
+    border-left: 2px solid #1a6b3c;
+}
+/* 悬停时显示浮动层 */
+.article-card:hover .hover-expand {
+    display: block;
+}
+/* 已读文章弱化样式 */
+.article-card.read {
+    opacity: 0.55;
+}
+.article-card.read .card-content h2 {
+    font-weight: 400;
+    color: #78716c;
+}
+.article-card.read:hover {
+    opacity: 0.85;
+}
+</style>
+<div class="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-8rem)]">
+    <!-- 左侧：筛选器 + 文章列表 -->
+    <div class="w-full md:w-[420px] flex-shrink-0 flex flex-col">
+        <!-- 筛选器 -->
+        <div class="bg-white rounded-xl shadow-sm p-3 mb-3 flex gap-3 items-center flex-wrap">
+            <input type="text"
+                   id="search-input"
+                   placeholder="搜索文章..."
+                   class="px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 flex-1 min-w-[120px] text-sm">
+
+            <select id="filter-feed" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                <option value="">所有订阅源</option>
+                {{range .Feeds}}
+                <option value="{{.ID}}">{{.Title}}</option>
+                {{end}}
+            </select>
+
+            <select id="filter-category" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                <option value="">所有分类</option>
+                {{range .Categories}}
+                <option value="{{.ID}}">{{.Name}}</option>
+                {{end}}
+            </select>
+
+            <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" id="filter-hide-ads" checked class="w-3.5 h-3.5 text-blue-600 rounded">
+                <span class="text-xs text-gray-600">隐藏广告</span>
+            </label>
+
+            <select id="filter-read-status" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                <option value="">全部</option>
+                <option value="unread">未读</option>
+                <option value="read">已读</option>
+            </select>
+
+            <!-- 标签筛选显示 -->
+            <div id="tag-filter-display" class="hidden flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm">
+                <span id="tag-filter-name"></span>
+                <button onclick="clearTagFilter()" class="ml-1 hover:text-blue-900 font-bold">&times;</button>
+            </div>
+        </div>
+
+        <!-- 瀑布流文章列表 -->
+        <div class="flex-1 md:min-h-0 overflow-y-auto pr-2">
+            <div id="articles-grid" class="columns-1 gap-3">
+                <!-- 文章卡片将通过 JS 动态加载 -->
+            </div>
+
+            <!-- 加载更多指示器 -->
+            <div id="load-more-trigger" class="py-4 text-center text-gray-400">
+                <div class="inline-flex items-center gap-2 text-sm">
+                    <div class="animate-spin rounded-full h-4 w-4 border-2 border-blue-500 border-t-transparent"></div>
+                    <span>加载中...</span>
+                </div>
+            </div>
+
+            <!-- 没有更多文章 -->
+            <div id="no-more-articles" class="hidden py-4 text-center text-gray-400 text-sm">
+                <span>没有更多文章了</span>
+            </div>
+
+            <!-- 空状态 -->
+            <div id="empty-state" class="hidden py-12 text-center text-gray-500">
+                <div class="text-4xl mb-3">📭</div>
+                <p>暂无文章</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧：文章预览栏 -->
+    <div class="flex-1 flex flex-col min-w-0">
+        <div class="bg-white rounded-xl shadow-sm flex-1 md:overflow-hidden flex flex-col" id="article-preview">
+            <!-- 默认空状态 -->
+            <div id="preview-empty" class="flex-1 flex items-center justify-center text-gray-400">
+                <div class="text-center">
+                    <div class="text-5xl mb-4">📖</div>
+                    <p>选择一篇文章查看详情</p>
+                </div>
+            </div>
+            <!-- 文章内容区域 -->
+            <div id="preview-content" class="hidden flex-1 flex flex-col md:overflow-hidden">
+                <!-- 头部信息 -->
+                <div class="p-6 border-b border-gray-100 flex-shrink-0">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <span id="preview-source" class="text-sm bg-blue-100 text-blue-700 px-2 py-1 rounded"></span>
+                            <span id="preview-time" class="text-sm text-gray-400"></span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <a id="preview-link" href="#" target="_blank"
+                               class="text-sm text-blue-500 underline hover:text-blue-700 flex items-center gap-1">
+                                查看原文 ↗
+                            </a>
+                        </div>
+                    </div>
+                    <h1 id="preview-title" class="text-xl font-bold text-gray-900 mb-3"></h1>
+                    <!-- AI 分析标签 -->
+                    <div id="preview-tags" class="hidden">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm text-gray-500">关键词：</span>
+                            <div id="preview-keywords" class="flex gap-1 flex-wrap"></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 文章正文 -->
+                <div class="md:flex-1 md:overflow-y-auto p-6">
+                    <div id="translate-toggle-container" class="hidden mb-3">
+                        <button id="translate-toggle" onclick="toggleTranslation()" class="text-sm bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 transition cursor-pointer">
+                            查看中文翻译
+                        </button>
+                    </div>
+                    <div id="fetch-original-container" class="hidden mb-3">
+                        <button id="fetch-original-btn" onclick="fetchOriginalContent()" class="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 transition cursor-pointer">
+                            获取原文
+                        </button>
+                    </div>
+                    <div id="preview-body" class="prose prose-sm max-w-none text-gray-700 leading-relaxed"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 状态管理
+let currentOffset = 0;
+let isLoading = false;
+let hasMore = true;
+let selectedArticleId = null;
+const pageSize = 20;
+
+// 标记文章为已读
+async function markArticleRead(id) {
+    const card = document.querySelector(`[data-article-id="${id}"]`);
+    if (card && !card.classList.contains('read')) {
+        card.classList.add('read');
+    }
+    try {
+        await fetch(`/api/articles/${id}/read`, { method: 'POST' });
+    } catch (e) {
+        console.error('标记已读失败:', e);
+    }
+}
+
+// 从 URL 获取 tag 参数
+function getTagFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tag') || '';
+}
+
+// 获取当前筛选条件
+function getFilterParams() {
+    const tag = getTagFromUrl();
+    return {
+        feed_id: document.getElementById('filter-feed').value,
+        category_id: document.getElementById('filter-category').value,
+        hide_ads: document.getElementById('filter-hide-ads').checked ? 'on' : '',
+        is_read: document.getElementById('filter-read-status').value === 'read' ? 'true' : document.getElementById('filter-read-status').value === 'unread' ? 'false' : '',
+        q: document.getElementById('search-input').value,
+        tag: tag
+    };
+}
+
+// 构建查询字符串
+function buildQueryString(params) {
+    const parts = [];
+    for (const [key, value] of Object.entries(params)) {
+        if (value) parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+    }
+    return parts.join('&');
+}
+
+// 加载文章
+async function loadArticles(append = false) {
+    if (isLoading || !hasMore) return;
+    isLoading = true;
+
+    const trigger = document.getElementById('load-more-trigger');
+    const noMore = document.getElementById('no-more-articles');
+    const empty = document.getElementById('empty-state');
+
+    trigger.classList.remove('hidden');
+    noMore.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    const params = getFilterParams();
+    params.offset = currentOffset;
+    params.limit = pageSize;
+
+    const queryString = buildQueryString(params);
+
+    try {
+        const response = await fetch(`/api/articles?${queryString}`);
+        const articles = await response.json();
+
+        if (!append) {
+            document.getElementById('articles-grid').innerHTML = '';
+            currentOffset = 0;
+        }
+
+        if (articles.length === 0 && !append) {
+            hasMore = false;
+            trigger.classList.add('hidden');
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        if (articles.length === 0) {
+            hasMore = false;
+            trigger.classList.add('hidden');
+            noMore.classList.remove('hidden');
+            return;
+        }
+
+        if (articles.length < pageSize) {
+            hasMore = false;
+            noMore.classList.remove('hidden');
+            trigger.classList.add('hidden');
+        }
+
+        const grid = document.getElementById('articles-grid');
+        articles.forEach(article => {
+            const card = createArticleCard(article);
+            grid.insertAdjacentHTML('beforeend', card);
+        });
+
+        currentOffset += articles.length;
+    } catch (err) {
+        console.error('加载文章失败:', err);
+    } finally {
+        isLoading = false;
+        // 只有在没有更多文章时才隐藏加载指示器
+        if (!hasMore) {
+            trigger.classList.add('hidden');
+        }
+    }
+}
+
+// 创建文章卡片 HTML
+function createArticleCard(article) {
+    const adBadge = article.is_ad ? '<span class="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">广告</span>' : '';
+    const failBadge = article.keywords === '处理失败'
+        ? `<button onclick="event.stopPropagation(); retryArticle(${article.id}, this)" class="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded hover:bg-red-200 transition disabled:opacity-50">⚠ 处理失败 · 重试</button>`
+        : '';
+    const summary = article.ai_summary || article.summary || '';
+    const summaryText = summary.length > 100 ? summary.substring(0, 100) + '...' : summary;
+    const time = article.published_at || '';
+    const readClass = article.is_read ? 'read' : '';
+
+    return `
+    <article class="article-card ${readClass} group relative bg-white rounded-lg shadow-sm transition-all duration-200 cursor-pointer border border-transparent mb-3"
+             data-article-id="${article.id}"
+             onclick="selectArticle(${article.id}, this)">
+        <div class="card-content p-3">
+            <h2 class="text-sm font-semibold text-gray-900 mb-1.5 line-clamp-2">${adBadge}${failBadge} ${escapeHtml(article.title)}</h2>
+            <p class="text-gray-500 text-xs line-clamp-3 mb-2">${escapeHtml(summary)}</p>
+            <div class="flex items-center gap-2 text-xs text-gray-400">
+                <span>📰 ${article.feed_title}</span>
+                <span>📅 ${time}</span>
+            </div>
+        </div>
+        <!-- 悬停浮动层 - 显示完整内容 -->
+        <div class="hover-expand">
+            <h2 class="text-sm font-semibold text-gray-900 mb-1.5">${adBadge}${failBadge} ${escapeHtml(article.title)}</h2>
+            <p class="text-gray-500 text-xs mb-2">${escapeHtml(summary)}</p>
+            <div class="flex items-center gap-2 text-xs text-gray-400">
+                <span>📰 ${article.feed_title}</span>
+                <span>📅 ${time}</span>
+            </div>
+        </div>
+    </article>`;
+}
+
+// 手动重新处理失败的文章
+async function retryArticle(id, btn) {
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ 已提交，AI 分析中…';
+    try {
+        const res = await fetch(`/api/articles/${id}/retry`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || '提交失败');
+        btn.textContent = '✓ 已重新提交，稍后自动刷新';
+        setTimeout(() => location.reload(), 3000);
+    } catch (err) {
+        alert('重新处理失败：' + err.message);
+        btn.disabled = false;
+        btn.textContent = old;
+    }
+}
+
+// HTML 转义
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 选中文章
+function selectArticle(id, element) {
+    // 移除之前的选中状态
+    document.querySelectorAll('#articles-grid article').forEach(el => {
+        el.classList.remove('bg-blue-50');
+    });
+
+    // 添加选中状态（只用背景色，不用边框）
+    element.classList.add('bg-blue-50');
+
+    selectedArticleId = id;
+    loadArticlePreview(id);
+}
+
+// 加载文章预览
+async function loadArticlePreview(id) {
+    try {
+        const response = await fetch(`/api/articles/${id}`);
+        const article = await response.json();
+
+        // 隐藏空状态，显示内容
+        document.getElementById('preview-empty').classList.add('hidden');
+        document.getElementById('preview-content').classList.remove('hidden');
+
+        // 标记为已读（后端持久化）
+        markArticleRead(id);
+
+        // 填充内容
+        document.getElementById('preview-title').textContent = article.title || '无标题';
+        document.getElementById('preview-source').textContent = article.feed_title || '未知来源';
+        document.getElementById('preview-time').textContent = article.published_at || '';
+        document.getElementById('preview-link').href = article.link || '#';
+
+        // 翻译切换
+        const translateContainer = document.getElementById('translate-toggle-container');
+        const translateBtn = document.getElementById('translate-toggle');
+        if (article.translated_content) {
+            translateContainer.classList.remove('hidden');
+            translateBtn.textContent = '查看中文翻译';
+            translateBtn.dataset.showingTranslation = 'false';
+            window._currentOriginalBody = null;
+        } else {
+            translateContainer.classList.add('hidden');
+        }
+
+        // 获取原文按钮
+        const fetchContainer = document.getElementById('fetch-original-container');
+        const fetchBtn = document.getElementById('fetch-original-btn');
+        if (article.link) {
+            fetchContainer.classList.remove('hidden');
+            fetchBtn.textContent = '获取原文';
+            fetchBtn.disabled = false;
+        } else {
+            fetchContainer.classList.add('hidden');
+        }
+
+        // 正文内容 - 优先使用 content，然后是 summary
+        let body = article.content || article.summary || '暂无内容';
+        // 如果是HTML内容，直接渲染；否则用formatContent处理
+        if (body.includes('<') && body.includes('>')) {
+            document.getElementById('preview-body').innerHTML = body;
+        } else {
+            document.getElementById('preview-body').innerHTML = formatContent(body);
+        }
+
+        // 保存原始正文
+        window._currentOriginalBody = document.getElementById('preview-body').innerHTML;
+        window._currentTranslatedContent = article.translated_content || '';
+
+        // 关键词
+        const tagsContainer = document.getElementById('preview-tags');
+        const keywordsEl = document.getElementById('preview-keywords');
+        if (article.keywords) {
+            tagsContainer.classList.remove('hidden');
+            keywordsEl.innerHTML = article.keywords.split(',').map(k => {
+                const keyword = k.trim();
+                return `<a href="/articles?tag=${encodeURIComponent(keyword)}" class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-blue-100 hover:text-blue-700 transition">${keyword}</a>`;
+            }).join('');
+        } else {
+            tagsContainer.classList.add('hidden');
+        }
+    } catch (err) {
+        console.error('加载文章详情失败:', err);
+    }
+}
+
+// 格式化内容
+function formatContent(content) {
+    if (!content) return '';
+    return content.split(/\n\n+/).map(p => `<p>${p}</p>`).join('');
+}
+
+// 切换翻译
+function toggleTranslation() {
+    const btn = document.getElementById('translate-toggle');
+    const body = document.getElementById('preview-body');
+    if (btn.dataset.showingTranslation === 'true') {
+        body.innerHTML = window._currentOriginalBody;
+        btn.textContent = '查看中文翻译';
+        btn.dataset.showingTranslation = 'false';
+    } else {
+        body.innerHTML = formatContent(window._currentTranslatedContent);
+        btn.textContent = '查看原文';
+        btn.dataset.showingTranslation = 'true';
+    }
+}
+
+// 获取原文
+async function fetchOriginalContent() {
+    const btn = document.getElementById('fetch-original-btn');
+    btn.textContent = '获取中...';
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/articles/${selectedArticleId}/fetch-original`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            document.getElementById('preview-body').innerHTML = data.content;
+            window._currentOriginalBody = data.content;
+            btn.textContent = '已获取原文';
+        } else {
+            alert('获取失败: ' + data.error);
+            btn.textContent = '获取原文';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        alert('请求失败: ' + e.message);
+        btn.textContent = '获取原文';
+        btn.disabled = false;
+    }
+}
+
+// 筛选条件变化时重新加载
+['filter-feed', 'filter-category', 'filter-hide-ads', 'filter-read-status'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+        currentOffset = 0;
+        hasMore = true;
+        loadArticles(false);
+    });
+});
+
+// 搜索框防抖
+let searchTimeout;
+document.getElementById('search-input').addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        currentOffset = 0;
+        hasMore = true;
+        loadArticles(false);
+    }, 500);
+});
+
+// 无限滚动 - Intersection Observer
+const scrollContainer = document.querySelector('.flex-1.overflow-y-auto');
+const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting && hasMore && !isLoading) {
+            loadArticles(true);
+        }
+    });
+}, { root: scrollContainer, rootMargin: '100px' });
+
+observer.observe(document.getElementById('load-more-trigger'));
+
+// 初始化标签筛选
+function initTagFilter() {
+    const tag = getTagFromUrl();
+    if (tag) {
+        const tagDisplay = document.getElementById('tag-filter-display');
+        const tagName = document.getElementById('tag-filter-name');
+        tagName.textContent = tag;
+        tagDisplay.classList.remove('hidden');
+    }
+}
+
+// 清除标签筛选
+function clearTagFilter() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('tag');
+    window.location.href = url.toString();
+}
+
+// 初始化
+initTagFilter();
+
+// 初始加载
+loadArticles(false);
+</script>
+{{end}}

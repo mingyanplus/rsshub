@@ -1,0 +1,19 @@
+# 运行产物
+*.exe
+*.log
+data/
+articles.json
+
+# 本地配置（含密钥）
+config.yaml
+
+# 工具目录
+.claude/
+.playwright-mcp/
+
+# 开发过程文档（编程计划/superpowers）
+docs/
+
+# IDE
+.idea/
+.vscode/

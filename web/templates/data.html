@@ -1,0 +1,301 @@
+{{define "content"}}
+<div class="space-y-6">
+    <!-- 描述 -->
+    <p class="text-gray-500 text-sm">备份、恢复和清理数据</p>
+
+    <!-- 存储统计 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-500">数据库大小</p>
+                    <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.DatabaseSize}}</p>
+                </div>
+                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <span class="text-xl">💾</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-500">文章总数</p>
+                    <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.TotalArticles}}</p>
+                </div>
+                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                    <span class="text-xl">📄</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-500">向量数据</p>
+                    <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.EmbeddingCount}}</p>
+                </div>
+                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                    <span class="text-xl">🧮</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-500">最近备份</p>
+                    <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.LastBackup}}</p>
+                </div>
+                <div class="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
+                    <span class="text-xl">📦</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据备份 -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="font-semibold text-gray-800 flex items-center gap-2 mb-4">
+            <span>📦</span> 数据备份
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="border border-gray-200 rounded-lg p-4">
+                <h4 class="font-medium text-gray-900 mb-2">导出数据</h4>
+                <p class="text-sm text-gray-500 mb-3">将所有数据导出为 JSON 格式文件</p>
+                <div class="flex gap-2">
+                    <button onclick="exportData('json')"
+                              class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm">
+                        导出 JSON
+                    </button>
+                    <button onclick="exportData('csv')"
+                              class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition text-sm">
+                        导出 CSV
+                    </button>
+                    <button onclick="exportData('opml')"
+                              class="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition text-sm">
+                        导出 OPML
+                    </button>
+                </div>
+                <div id="export-result" class="mt-2 text-sm"></div>
+            </div>
+
+            <div class="border border-gray-200 rounded-lg p-4">
+                <h4 class="font-medium text-gray-900 mb-2">导入数据</h4>
+                <p class="text-sm text-gray-500 mb-3">从备份文件恢复数据</p>
+                <div class="flex items-center gap-2">
+                    <input type="file"
+                           id="import-file"
+                           accept=".json,.csv,.opml"
+                           class="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2">
+                    <button onclick="importData()"
+                              class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition text-sm">
+                        导入
+                    </button>
+                </div>
+                <div id="import-result" class="mt-2 text-sm"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据清理 -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="font-semibold text-gray-800 flex items-center gap-2 mb-4">
+            <span>🧹</span> 数据清理
+        </h3>
+        <div class="space-y-4">
+            <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div>
+                    <h4 class="font-medium text-gray-900">清理旧文章</h4>
+                    <p class="text-sm text-gray-500">删除超过指定天数的已读文章</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <select id="cleanup-days" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="30">30 天前</option>
+                        <option value="60">60 天前</option>
+                        <option value="90">90 天前</option>
+                        <option value="180">180 天前</option>
+                    </select>
+                    <button hx-post="/api/data/cleanup"
+                              hx-vals='{"type":"old_articles"}'
+                              hx-include="#cleanup-days"
+                              hx-target="#cleanup-result"
+                              hx-confirm="确定要清理旧文章吗？此操作不可恢复。"
+                              class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm">
+                        清理
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div>
+                    <h4 class="font-medium text-gray-900">清理广告文章</h4>
+                    <p class="text-sm text-gray-500">删除所有被 AI 识别为广告的文章</p>
+                    <p class="text-xs text-gray-400 mt-1">当前有 {{.Stats.AdArticles}} 篇广告文章</p>
+                </div>
+                <button hx-post="/api/data/cleanup"
+                          hx-vals='{"type":"ad_articles"}'
+                          hx-target="#cleanup-result"
+                          hx-confirm="确定要清理所有广告文章吗？此操作不可恢复。"
+                          class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm">
+                    清理
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div>
+                    <h4 class="font-medium text-gray-900">清理向量缓存</h4>
+                    <p class="text-sm text-gray-500">清除所有文章的向量嵌入数据</p>
+                    <p class="text-xs text-gray-400 mt-1">清除后下次处理时会重新生成</p>
+                </div>
+                <button hx-post="/api/data/cleanup"
+                          hx-vals='{"type":"embeddings"}'
+                          hx-target="#cleanup-result"
+                          hx-confirm="确定要清理向量缓存吗？"
+                          class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition text-sm">
+                    清理
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div>
+                    <h4 class="font-medium text-gray-900">清理失败通知</h4>
+                    <p class="text-sm text-gray-500">删除所有发送失败的推送记录</p>
+                </div>
+                <button hx-post="/api/data/cleanup"
+                          hx-vals='{"type":"failed_notifications"}'
+                          hx-target="#cleanup-result"
+                          class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition text-sm">
+                    清理
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between p-4 border border-red-200 rounded-lg bg-red-50">
+                <div>
+                    <h4 class="font-medium text-red-900">清空所有文章和标签</h4>
+                    <p class="text-sm text-red-600">删除所有文章、标签及其关联（保留订阅源）</p>
+                </div>
+                <button hx-post="/api/data/cleanup"
+                          hx-vals='{"type":"all_articles"}'
+                          hx-target="#cleanup-result"
+                          hx-confirm="⚠️ 确定要清空所有文章和标签吗？此操作不可恢复！"
+                          class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm">
+                    清空
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div>
+                    <h4 class="font-medium text-gray-900">压缩数据库</h4>
+                    <p class="text-sm text-gray-500">释放已删除数据占用的磁盘空间</p>
+                </div>
+                <button hx-post="/api/data/vacuum"
+                          hx-target="#cleanup-result"
+                          hx-confirm="确定要压缩数据库吗？这可能需要几秒钟。"
+                          class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-sm">
+                    压缩
+                </button>
+            </div>
+
+            <div id="cleanup-result" class="mt-2 text-sm"></div>
+        </div>
+    </div>
+
+    <!-- 危险操作 -->
+    <div class="bg-red-50 rounded-xl border border-red-200 p-6">
+        <h3 class="font-semibold text-red-800 flex items-center gap-2 mb-4">
+            <span>⚠️</span> 危险操作
+        </h3>
+        <div class="space-y-4">
+            <div class="flex items-center justify-between p-4 bg-white rounded-lg border border-red-200">
+                <div>
+                    <h4 class="font-medium text-red-900">重置数据库</h4>
+                    <p class="text-sm text-red-600">删除所有数据并重新初始化数据库</p>
+                </div>
+                <button hx-post="/api/data/reset"
+                          hx-target="#reset-result"
+                          hx-confirm="⚠️ 警告：此操作将删除所有数据，且不可恢复！确定要继续吗？"
+                          class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm">
+                    重置数据库
+                </button>
+            </div>
+            <div id="reset-result" class="text-sm"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+function exportData(format) {
+    const resultDiv = document.getElementById('export-result');
+    resultDiv.innerHTML = '<span class="text-gray-500">正在导出...</span>';
+
+    fetch('/api/data/export', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'format=' + format
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('导出失败');
+        }
+        // 从 Content-Disposition 获取文件名
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'export.' + format;
+        if (disposition) {
+            // 匹配 filename="xxx" 格式（注意不是 filename*=）
+            const match = disposition.match(/filename="([^"]+)"/);
+            if (match) {
+                filename = match[1];
+            }
+        }
+        return response.blob().then(blob => ({ blob, filename }));
+    })
+    .then(({ blob, filename }) => {
+        // 创建下载链接
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        resultDiv.innerHTML = '<span class="text-green-600">✓ 导出成功</span>';
+    })
+    .catch(err => {
+        resultDiv.innerHTML = `<span class="text-red-600">✗ 导出失败: ${err.message}</span>`;
+    });
+}
+
+function importData() {
+    const fileInput = document.getElementById('import-file');
+    const file = fileInput.files[0];
+    if (!file) {
+        alert('请选择要导入的文件');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/data/import', {
+        method: 'POST',
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        const resultDiv = document.getElementById('import-result');
+        if (data.success) {
+            resultDiv.innerHTML = `<span class="text-green-600">✓ ${data.message}</span>`;
+        } else {
+            resultDiv.innerHTML = `<span class="text-red-600">✗ ${data.error}</span>`;
+        }
+    })
+    .catch(err => {
+        document.getElementById('import-result').innerHTML = `<span class="text-red-600">✗ 导入失败: ${err}</span>`;
+    });
+}
+</script>
+{{end}}

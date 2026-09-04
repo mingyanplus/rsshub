@@ -1,0 +1,86 @@
+# RSS AI Reader 配置示例
+
+# HTTP 服务器配置
+server:
+  host: "127.0.0.1"
+  port: 8080
+  log_level: "INFO"       # 日志级别: DEBUG, INFO, WARN, ERROR
+  log_max_line_len: 500 # 单行最大长度，0 表示不限制
+
+# 数据库配置
+database:
+  path: "./data/rss.db"
+
+# AI 配置
+ai:
+  # LLM 配置（用于摘要、分类、广告识别等）
+  llm:
+    provider: "openai"
+    base_url: "https://api.deepseek.com/v1"
+    api_key: "your-api-key-here"
+    model: "deepseek-chat"
+    timeout: "60s"
+
+  # Embedding 配置（用于向量化）
+  embedding:
+    provider: "openai"
+    base_url: "https://api.openai.com/v1"
+    api_key: "your-api-key-here"
+    model: "text-embedding-3-small"
+    timeout: "30s"
+
+# RSS 订阅配置
+feeds:
+  default_interval: "30m"
+  max_concurrent: 5
+  timeout: "30s"
+  fetch_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# 定时任务配置
+scheduler:
+  morning_report_time: "08:00"
+  evening_report_time: "20:00"
+
+# 数据清理配置
+cleanup:
+  ad_retention_days: 7
+  notification_retention_days: 14
+  auto_cleanup_time: "03:00"
+
+# 推送渠道配置
+push:
+  # 邮件推送
+  email:
+    enabled: false
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    username: ""
+    password: ""
+    from: ""
+    to: ""
+
+  # Gotify 推送
+  gotify:
+    enabled: false
+    url: "https://gotify.example.com"
+    app_token: ""
+    priority: 5
+
+  # QQ Bot 推送
+  qqbot:
+    enabled: false
+    app_id: ""
+    app_token: ""
+    user_id: ""
+    enable_markdown: true  # 是否启用 Markdown 格式（true: 发送完整 Markdown 含链接; false: 转为纯文本）
+
+  # Webhook 推送
+  webhook:
+    enabled: false
+    url: ""
+    headers: {}
+
+# 事件匹配器配置
+event_matcher:
+  match_threshold: 0.65          # 综合匹配阈值 (0-1)，越大越严格
+  vector_min_similarity: 0.45    # 向量相似度最低阈值 (0-1)，越大越严格

@@ -1,0 +1,856 @@
+{{template "layout" .}}
+{{define "content"}}
+<style>
+/* 事件卡片选中效果 */
+.event-card {
+    transition: all 0.2s ease;
+}
+.event-card.selected {
+    background-color: #f0f7f2;
+    border-color: #1a6b3c;
+}
+.event-card:hover {
+    border-color: #b7d5c4;
+}
+</style>
+<div class="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-180px)]">
+    <!-- 左侧：事件列表 -->
+    <div class="w-full md:w-[400px] flex-shrink-0 flex flex-col">
+        <!-- 标题栏 -->
+        <div class="bg-white rounded-xl shadow-sm p-3 mb-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-gray-500" aria-hidden="true"><use href="#i-search"/></svg>
+                    <h2 class="font-semibold text-gray-800">事件追踪</h2>
+                </div>
+                <button onclick="showCreateModal()"
+                        class="bg-blue-500 text-white px-3 py-1.5 rounded-lg hover:bg-blue-600 transition flex items-center gap-1 text-sm">
+                    <span>➕</span> 创建
+                </button>
+            </div>
+            <!-- 状态筛选 -->
+            <div class="flex gap-1 mt-3 flex-wrap">
+                <button onclick="loadEvents('')" class="status-btn px-3 py-1 rounded-lg text-sm bg-slate-100 text-slate-700 hover:bg-slate-200" data-status="">全部</button>
+                <button onclick="loadEvents('pending')" class="status-btn px-3 py-1 rounded-lg text-sm bg-orange-100 text-orange-700 hover:bg-orange-200" data-status="pending">待关注</button>
+                <button onclick="loadEvents('active')" class="status-btn px-3 py-1 rounded-lg text-sm bg-green-100 text-green-700 hover:bg-green-200" data-status="active">追踪中</button>
+                <button onclick="loadEvents('paused')" class="status-btn px-3 py-1 rounded-lg text-sm bg-gray-100 text-gray-700 hover:bg-gray-200" data-status="paused">已暂停</button>
+                <button onclick="loadEvents('completed')" class="status-btn px-3 py-1 rounded-lg text-sm bg-blue-100 text-blue-700 hover:bg-blue-200" data-status="completed">已结束</button>
+            </div>
+        </div>
+
+        <!-- 事件列表 -->
+        <div class="flex-1 md:min-h-0 overflow-y-auto pr-2 space-y-2" id="events-list">
+            <!-- 事件卡片将通过 JS 动态加载 -->
+        </div>
+    </div>
+
+    <!-- 右侧：文章预览 -->
+    <div class="flex-1 flex flex-col min-w-0">
+        <div class="bg-white rounded-xl shadow-sm flex-1 md:overflow-hidden flex flex-col" id="preview-panel">
+            <!-- 默认空状态 -->
+            <div id="preview-empty" class="flex-1 flex items-center justify-center text-gray-400">
+                <div class="text-center">
+                    <div class="text-5xl mb-4">📰</div>
+                    <p>选择一个事件查看相关文章</p>
+                </div>
+            </div>
+            <!-- 内容区域 -->
+            <div id="preview-content" class="hidden flex-1 flex flex-col md:overflow-hidden">
+                <!-- 头部 -->
+                <div class="p-4 border-b border-gray-100 flex-shrink-0">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-5 h-5 text-gray-500" aria-hidden="true"><use href="#i-search"/></svg>
+                            <h3 class="font-semibold text-gray-800" id="preview-event-name">事件名称</h3>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span id="preview-event-status" class="text-xs px-2 py-1 rounded"></span>
+                            <button onclick="matchSingleEvent()" id="match-btn" class="text-sm text-green-600 hover:underline hidden">重新匹配</button>
+                            <button onclick="optimizeEvent()" id="optimize-btn" class="text-sm text-purple-600 hover:underline hidden">🤖 优化描述</button>
+                            <button onclick="checkMatchQuality()" id="quality-btn" class="text-sm text-orange-600 hover:underline hidden">✅ 检查质量</button>
+                            <button onclick="editCurrentEvent()" class="text-sm text-blue-500 hover:underline">编辑</button>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1" id="preview-event-desc"></p>
+                    <div class="flex items-center gap-4 mt-2">
+                        <span class="text-xs text-gray-400" id="preview-event-keywords"></span>
+                        <span class="text-xs text-gray-400" id="preview-event-count"></span>
+                    </div>
+                    <!-- 角色标签切换 -->
+                    <div id="role-tabs" class="flex flex-wrap gap-2 mt-3 hidden">
+                        <!-- 角色标签将通过 JS 动态生成 -->
+                    </div>
+                </div>
+                <!-- 文章列表 -->
+                <div class="md:flex-1 md:overflow-y-auto">
+                    <div id="preview-articles" class="divide-y divide-gray-100">
+                        <!-- 文章将通过 JS 动态加载 -->
+                    </div>
+                    <!-- 加载状态 -->
+                    <div id="preview-loading" class="hidden py-8 text-center">
+                        <div class="inline-flex items-center gap-2 text-gray-400">
+                            <div class="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+                            <span>加载中...</span>
+                        </div>
+                    </div>
+                    <!-- 空状态 -->
+                    <div id="preview-no-articles" class="hidden py-12 text-center text-gray-500">
+                        <div class="text-4xl mb-3">📭</div>
+                        <p>暂无相关文章</p>
+                        <p class="text-sm text-gray-400 mt-1">该事件暂未匹配到文章</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 创建/编辑模态框 -->
+<div id="event-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-semibold mb-4" id="modal-title">创建事件追踪</h3>
+        <form id="event-form" class="space-y-4">
+            <input type="hidden" name="id" id="event-id" value="">
+            <div>
+                <label class="block text-sm font-medium mb-1">事件名称 *</label>
+                <input type="text" name="name" id="event-name" required class="w-full border rounded-lg px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">状态</label>
+                <select name="status" id="event-status" class="w-full border rounded-lg px-3 py-2">
+                    <option value="pending">待关注</option>
+                    <option value="active">追踪中</option>
+                    <option value="paused">已暂停</option>
+                    <option value="completed">已结束</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1 text-green-600">正向关键词 <span class="text-gray-400 font-normal">(匹配时加分，逗号分隔)</span></label>
+                <textarea name="keywords" id="event-keywords" rows="2" class="w-full border border-green-200 rounded-lg px-3 py-2 text-sm" placeholder="如：AI大模型,OpenAI,NVIDIA,算力"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1 text-red-600">负面关键词 <span class="text-gray-400 font-normal">(匹配时扣分，逗号分隔)</span></label>
+                <textarea name="negative_keywords" id="event-negative-keywords" rows="2" class="w-full border border-red-200 rounded-lg px-3 py-2 text-sm" placeholder="如：医疗,融资,汽车,功能更新"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">事件描述</label>
+                <textarea name="description" id="event-description" rows="3" class="w-full border rounded-lg px-3 py-2"></textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">关注角色 <span class="text-gray-400 font-normal">(逗号分隔)</span></label>
+                <input type="text" name="roles" id="event-roles" class="w-full border rounded-lg px-3 py-2" placeholder="如：美方,伊方">
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="hideModal()" class="px-4 py-2 border rounded-lg hover:bg-gray-50">取消</button>
+                <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 文章预览模态框 -->
+<div id="article-preview-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center" onclick="if(event.target===this) hideArticlePreview()">
+    <div class="bg-white rounded-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+        <div class="p-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-semibold text-gray-900 line-clamp-2" id="preview-article-title">文章标题</h3>
+            <button onclick="hideArticlePreview()" class="text-gray-400 hover:text-gray-600 p-1">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="p-4 overflow-y-auto flex-1">
+            <div class="flex items-center gap-2 text-sm text-gray-500 mb-3">
+                <span id="preview-article-source"></span>
+                <span>·</span>
+                <span id="preview-article-time"></span>
+                <div id="evt-translate-toggle-container" class="hidden ml-auto">
+                    <button id="evt-translate-toggle" onclick="toggleEvtTranslation()" class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 transition cursor-pointer">
+                        中文翻译
+                    </button>
+                </div>
+                <div id="evt-fetch-original-container" class="hidden">
+                    <button id="evt-fetch-original-btn" onclick="fetchEvtOriginalContent()" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition cursor-pointer">
+                        获取原文
+                    </button>
+                </div>
+            </div>
+            <div id="preview-article-content" class="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap"></div>
+        </div>
+        <div class="p-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
+            <div id="preview-similar-links" class="flex flex-wrap items-center gap-2 max-h-16 overflow-y-auto"></div>
+            <a id="preview-article-link" href="#" target="_blank" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm">
+                查看原文 →
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+let selectedEventId = null;
+let currentStatus = 'active';
+let currentRole = '';  // 当前选中的角色
+let eventsData = [];
+let roleStats = {};  // 角色统计数据
+let lastQualityRecommendations = [];  // 存储最近一次质量检查的改进建议
+let qualityRecommendations = [];  // 质量检查的改进建议
+
+// 加载事件列表
+function loadEvents(status) {
+    currentStatus = status || '';
+    selectedEventId = null;
+
+    // 更新按钮状态
+    document.querySelectorAll('.status-btn').forEach(btn => {
+        btn.classList.remove('ring-2', 'ring-blue-500');
+        if (btn.dataset.status === currentStatus) {
+            btn.classList.add('ring-2', 'ring-blue-500');
+        }
+    });
+
+    // 隐藏预览
+    document.getElementById('preview-content').classList.add('hidden');
+    document.getElementById('preview-empty').classList.remove('hidden');
+
+    const container = document.getElementById('events-list');
+    container.innerHTML = '<div class="py-8 text-center text-gray-400"><div class="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent mx-auto"></div></div>';
+
+    fetch('/api/events?status=' + status)
+        .then(r => r.json())
+        .then(data => {
+            eventsData = data || [];
+            if (eventsData.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
+                        <div class="text-5xl mb-3">🔍</div>
+                        <p class="text-gray-500">暂无事件</p>
+                        <button onclick="showCreateModal()" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">
+                            创建第一个事件
+                        </button>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = eventsData.map(e => createEventCard(e)).join('');
+        })
+        .catch(err => {
+            console.error('加载事件失败:', err);
+            container.innerHTML = '<p class="text-red-500 text-center py-8">加载失败</p>';
+        });
+}
+
+// 创建事件卡片 HTML
+function createEventCard(e) {
+    const statusColors = {
+        'pending': 'bg-orange-100 text-orange-700',
+        'active': 'bg-green-100 text-green-700',
+        'paused': 'bg-gray-100 text-gray-700',
+        'completed': 'bg-blue-100 text-blue-700'
+    };
+    const statusLabels = {
+        'pending': '待关注',
+        'active': '追踪中',
+        'paused': '已暂停',
+        'completed': '已结束'
+    };
+
+    // 关键词标签（对齐话题卡片的分类 chip 风格）
+    const kws = (e.keywords || '').split(',').map(k => k.trim()).filter(k => k && k !== '已标记' && k !== '内容过滤').slice(0, 3);
+    const chipsHtml = kws.length
+        ? `<div class="flex flex-wrap gap-1 mb-2">${kws.map(k => `<span class="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">#${escapeHtml(k)}</span>`).join(' ')}</div>`
+        : '';
+
+    return `
+    <div class="event-card bg-white rounded-lg shadow-sm border border-gray-100 p-4 cursor-pointer"
+         id="event-${e.id}"
+         data-event-id="${e.id}"
+         onclick="selectEvent(${e.id}, this)">
+        <div class="flex items-start justify-between mb-2">
+            <div class="font-semibold text-gray-900 flex-1 min-w-0">${escapeHtml(e.name)}</div>
+            <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+                <button onclick="event.stopPropagation(); editEvent(${e.id})"
+                          class="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition"
+                          title="编辑">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                </button>
+                <button onclick="event.stopPropagation(); deleteEvent(${e.id})"
+                          class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                          title="删除">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        ${e.description ? `<p class="text-gray-500 text-sm mb-2 line-clamp-2">${escapeHtml(e.description)}</p>` : ''}
+        ${chipsHtml}
+        <div class="flex items-center justify-between">
+            <span class="text-xs px-2 py-0.5 rounded ${statusColors[e.status] || 'bg-gray-100 text-gray-600'}">${statusLabels[e.status] || e.status}</span>
+            <span class="text-xs text-gray-400">${e.match_count || 0} 篇${e.last_match_at ? ' · ' + formatRelativeTime(e.last_match_at) : ''}</span>
+        </div>
+    </div>`;
+}
+
+// 选中事件
+function selectEvent(id, element) {
+    document.querySelectorAll('.event-card').forEach(el => el.classList.remove('selected'));
+    element.classList.add('selected');
+    selectedEventId = id;
+    currentRole = '';  // 重置角色筛选
+
+    const event = eventsData.find(e => e.id === id);
+    if (!event) return;
+
+    // 显示预览面板
+    document.getElementById('preview-empty').classList.add('hidden');
+    document.getElementById('preview-content').classList.remove('hidden');
+    document.getElementById('preview-loading').classList.remove('hidden');
+    document.getElementById('preview-articles').innerHTML = '';
+    document.getElementById('preview-no-articles').classList.add('hidden');
+
+    // 更新预览头部信息
+    const statusColors = {
+        'pending': 'bg-orange-100 text-orange-700',
+        'active': 'bg-green-100 text-green-700',
+        'paused': 'bg-gray-100 text-gray-700',
+        'completed': 'bg-blue-100 text-blue-700'
+    };
+    const statusLabels = {
+        'pending': '待关注',
+        'active': '追踪中',
+        'paused': '已暂停',
+        'completed': '已结束'
+    };
+
+    document.getElementById('preview-event-name').textContent = event.name;
+    document.getElementById('preview-event-desc').textContent = event.description || '';
+    document.getElementById('preview-event-keywords').textContent = event.keywords ? '关键词: ' + event.keywords : '';
+    document.getElementById('preview-event-count').textContent = (event.match_count || 0) + ' 篇文章';
+
+    const statusEl = document.getElementById('preview-event-status');
+    statusEl.textContent = statusLabels[event.status] || event.status;
+    statusEl.className = 'text-xs px-2 py-1 rounded ' + (statusColors[event.status] || 'bg-gray-100 text-gray-600');
+
+    // 显示重新匹配按钮
+    const matchBtn = document.getElementById('match-btn');
+    matchBtn.classList.remove('hidden');
+    document.getElementById('optimize-btn').classList.remove('hidden');
+    document.getElementById('quality-btn').classList.remove('hidden');
+
+    // 加载角色统计和文章
+    loadRoleStats(id);
+    loadEventArticles(id);
+}
+
+// 加载角色统计
+async function loadRoleStats(eventId) {
+    try {
+        const response = await fetch(`/api/events/${eventId}/stats`);
+        const data = await response.json();
+        roleStats = data.role_stats || [];
+        renderRoleTabs(eventId);
+    } catch (err) {
+        console.error('加载角色统计失败:', err);
+        document.getElementById('role-tabs').classList.add('hidden');
+    }
+}
+
+// 渲染角色标签
+function renderRoleTabs(eventId) {
+    const container = document.getElementById('role-tabs');
+
+    // 获取总文章数
+    const totalCount = roleStats.reduce((sum, s) => sum + (s.count || 0), 0);
+
+    if (roleStats.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    let html = `
+        <button onclick="filterByRole('')" class="role-tab px-3 py-1 rounded-full text-sm transition ${!currentRole ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
+            全部 ${totalCount}
+        </button>
+    `;
+
+    roleStats.forEach(stat => {
+        if (stat.role && stat.count > 0) {
+            const isActive = currentRole === stat.role;
+            html += `
+                <button onclick="filterByRole('${escapeHtml(stat.role)}')" class="role-tab px-3 py-1 rounded-full text-sm transition ${isActive ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
+                    ${escapeHtml(stat.role)} ${stat.count}
+                </button>
+            `;
+        }
+    });
+
+    container.innerHTML = html;
+    container.classList.remove('hidden');
+}
+
+// 按角色筛选
+function filterByRole(role) {
+    currentRole = role;
+    renderRoleTabs(selectedEventId);
+    loadEventArticles(selectedEventId);
+}
+
+// 加载事件文章
+async function loadEventArticles(eventId) {
+    try {
+        let url = `/api/events/${eventId}/articles?limit=20`;
+        if (currentRole) {
+            url += `&role=${encodeURIComponent(currentRole)}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+        // API 返回 { articles: [...], total: ... } 格式，articles 可能是 null
+        const articles = Array.isArray(data.articles) ? data.articles : (Array.isArray(data) ? data : []);
+
+        document.getElementById('preview-loading').classList.add('hidden');
+
+        if (!articles || articles.length === 0) {
+            document.getElementById('preview-no-articles').classList.remove('hidden');
+            document.getElementById('preview-articles').innerHTML = '';
+            return;
+        }
+
+        document.getElementById('preview-no-articles').classList.add('hidden');
+        const container = document.getElementById('preview-articles');
+        container.innerHTML = articles.map((article, index) => createArticleItem(article, index)).join('');
+    } catch (err) {
+        console.error('加载文章失败:', err);
+        document.getElementById('preview-loading').classList.add('hidden');
+        document.getElementById('preview-no-articles').classList.remove('hidden');
+    }
+}
+
+// 创建文章项 - 时间轴样式
+function createArticleItem(article, index) {
+    const timeStr = article.published_at || '';
+    const relativeTime = formatRelativeTime(timeStr);
+    const isNew = index === 0; // 第一篇（最新）标记为"新"
+
+    // 生成相似文章链接（紧跟在标题后面，不换行）- 使用真实文章ID通过AJAX获取
+    let similarLinks = '';
+    if (article.similar_articles && article.similar_articles.length > 0) {
+        similarLinks = article.similar_articles.map((sa, i) => {
+            return `<a href="javascript:void(0)" class="text-blue-500 hover:underline ml-1" onclick="event.stopPropagation(); showArticlePreview(${sa.id})">[${i + 2}]</a>`;
+        }).join('');
+    }
+
+    // 存储相似文章引用用于底部链接
+    if (!window.currentSimilarArticles) window.currentSimilarArticles = {};
+    window.currentSimilarArticles[article.id] = article.similar_articles;
+
+    return `
+    <div class="flex items-start gap-4 px-4 py-3 hover:bg-gray-50 transition cursor-pointer"
+         onclick="showArticlePreview(${article.id})">
+        <div class="flex-shrink-0 flex items-center justify-end gap-1 w-24">
+            ${isNew ? '<span class="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded flex-shrink-0">新</span>' : ''}
+            <span class="text-sm text-gray-400 whitespace-nowrap tabular-nums">${relativeTime}</span>
+        </div>
+        <div class="flex-1 min-w-0">
+            <h4 class="text-sm text-gray-900 hover:text-blue-600 line-clamp-2">${escapeHtml(article.title)}${similarLinks}</h4>
+            ${(article.ai_summary || article.summary) ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${escapeHtml(String(article.ai_summary || article.summary).replace(/<[^>]+>/g, '').substring(0, 140))}</p>` : ''}
+            <div class="flex items-center gap-2 mt-1">
+                <span class="text-xs text-gray-400">${article.feed_title || article.feed_name || ''}</span>
+            </div>
+        </div>
+    </div>`;
+}
+
+// 格式化相对时间
+function formatRelativeTime(timeStr) {
+    if (!timeStr) return '';
+
+    try {
+        const date = new Date(timeStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        const timeOnly = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+        if (diffMins < 60) {
+            return diffMins <= 1 ? '刚刚' : diffMins + '分钟前';
+        } else if (diffHours < 24) {
+            return diffHours + '小时前';
+        } else if (diffDays === 1) {
+            return '昨天 ' + timeOnly;
+        } else if (diffDays === 2) {
+            return '前天 ' + timeOnly;
+        } else if (diffDays < 7) {
+            return diffDays + '天前';
+        } else {
+            return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + ' ' + timeOnly;
+        }
+    } catch (e) {
+        return timeStr;
+    }
+}
+
+// HTML 转义
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 显示创建模态框
+function showCreateModal() {
+    document.getElementById('modal-title').textContent = '创建事件追踪';
+    document.getElementById('event-form').reset();
+    document.getElementById('event-id').value = '';
+    document.getElementById('event-status').value = 'active';
+    document.getElementById('event-modal').classList.remove('hidden');
+}
+
+// 隐藏模态框
+function hideModal() {
+    document.getElementById('event-modal').classList.add('hidden');
+}
+
+// 编辑事件
+function editEvent(id) {
+    const event = eventsData.find(e => e.id === id);
+    if (!event) return;
+
+    document.getElementById('modal-title').textContent = '编辑事件';
+    document.getElementById('event-id').value = event.id;
+    document.getElementById('event-name').value = event.name;
+    document.getElementById('event-status').value = event.status || 'active';
+    document.getElementById('event-keywords').value = event.keywords || '';
+    document.getElementById('event-negative-keywords').value = event.negative_keywords || '';
+    document.getElementById('event-description').value = event.description || '';
+    document.getElementById('event-roles').value = event.roles || '';
+    document.getElementById('event-modal').classList.remove('hidden');
+}
+
+// 编辑当前选中的事件
+function editCurrentEvent() {
+    if (selectedEventId) {
+        editEvent(selectedEventId);
+    }
+}
+
+// 手动触发单个事件匹配
+function matchSingleEvent() {
+    if (!selectedEventId) return;
+
+    const btn = document.getElementById('match-btn');
+    btn.textContent = '匹配中...';
+    btn.disabled = true;
+
+    // 是否清除旧匹配
+    const clearOld = confirm('是否清除该事件的旧匹配记录？\n\n选择"确定"：清除旧记录，重新匹配\n选择"取消"：保留旧记录，增量匹配');
+
+    fetch(`/api/events/${selectedEventId}/match?clear=${clearOld}`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            alert(data.message || '匹配任务已启动');
+            btn.textContent = '重新匹配';
+            btn.disabled = false;
+            // 刷新文章列表
+            setTimeout(() => {
+                loadEvents(currentStatus);
+                selectEvent(selectedEventId, document.getElementById(`event-${selectedEventId}`));
+            }, 2000);
+        })
+        .catch(err => {
+            console.error('匹配失败:', err);
+            alert('匹配失败');
+            btn.textContent = '重新匹配';
+            btn.disabled = false;
+        });
+}
+
+// 优化事件描述
+function optimizeEvent() {
+    if (!selectedEventId) return;
+
+    const btn = document.getElementById('optimize-btn');
+    btn.textContent = '🤖 优化中...';
+    btn.disabled = true;
+
+    // 将质量检查的改进建议发送给后端
+    const body = {
+        recommendations: lastQualityRecommendations
+    };
+
+    fetch(`/api/events/${selectedEventId}/optimize`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    })
+        .then(res => res.json())
+        .then(data => {
+            console.log('优化返回数据:', data);  // 调试日志
+            if (data.error) {
+                alert('优化失败: ' + data.error);
+            } else {
+                let msg = '优化完成！\n\n';
+                msg += '优化后标题: ' + (data.title || '(无)') + '\n\n';
+                msg += '正向关键词: ' + (data.keywords || '(无)') + '\n\n';
+                msg += '负面关键词: ' + (data.negative_keywords || '(无)') + '\n\n';
+                msg += '优化后描述:\n' + (data.description || '(无)') + '\n\n';
+                msg += '关注对象: ' + (data.roles || '(无)') + '\n\n';
+                msg += '匹配建议: ' + (data.match_suggestions || '(无)');
+                console.log('显示消息:', msg);  // 调试日志
+                alert(msg);
+                // 清空保存的建议
+                lastQualityRecommendations = [];
+                // 刷新事件列表
+                loadEvents(currentStatus);
+            }
+            btn.textContent = '🤖 优化描述';
+            btn.disabled = false;
+        })
+        .catch(err => {
+            console.error('优化失败:', err);
+            alert('优化失败: ' + err.message);
+            btn.textContent = '🤖 优化描述';
+            btn.disabled = false;
+        });
+}
+
+// 检查匹配质量
+function checkMatchQuality() {
+    if (!selectedEventId) return;
+
+    const btn = document.getElementById('quality-btn');
+    btn.textContent = '✅ 检查中...';
+    btn.disabled = true;
+
+    fetch(`/api/events/${selectedEventId}/check-quality`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                alert('检查失败: ' + data.error);
+            } else {
+                // 保存改进建议供优化功能使用
+                lastQualityRecommendations = data.recommendations || [];
+
+                let msg = '匹配质量检查结果\n\n';
+                msg += '事件: ' + (data.event || '') + '\n';
+                msg += '总匹配数: ' + (data.total_matches || 0) + '\n';
+                msg += '相关性评分: ' + (data.relevance_score || 0) + '/100\n\n';
+                msg += '分析:\n' + (data.analysis || '') + '\n\n';
+                if (data.good_matches && data.good_matches.length > 0) {
+                    msg += '匹配良好的文章: #' + data.good_matches.join(', #') + '\n';
+                }
+                if (data.bad_matches && data.bad_matches.length > 0) {
+                    msg += '匹配不当的文章: #' + data.bad_matches.join(', #') + '\n';
+                }
+                if (data.recommendations && data.recommendations.length > 0) {
+                    msg += '\n改进建议:\n- ' + data.recommendations.join('\n- ');
+                    msg += '\n\n💡 建议已保存，点击"优化描述"可应用这些改进建议';
+                }
+                alert(msg);
+            }
+            btn.textContent = '✅ 检查质量';
+            btn.disabled = false;
+        })
+        .catch(err => {
+            console.error('检查失败:', err);
+            alert('检查失败: ' + err.message);
+            btn.textContent = '✅ 检查质量';
+            btn.disabled = false;
+        });
+}
+
+// 删除事件
+function deleteEvent(id) {
+    if (!confirm('确定要删除这个事件吗？')) return;
+
+    fetch(`/api/events/${id}`, { method: 'DELETE' })
+        .then(res => {
+            if (res.ok) {
+                loadEvents(currentStatus);
+            } else {
+                alert('删除失败');
+            }
+        })
+        .catch(err => {
+            console.error('删除失败:', err);
+            alert('删除失败');
+        });
+}
+
+// 表单提交
+document.getElementById('event-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const form = e.target;
+    const id = form.id.value;
+    const data = {
+        name: form.name.value,
+        status: form.status.value,
+        keywords: form.keywords.value,
+        negative_keywords: form.negative_keywords.value,
+        description: form.description.value,
+        roles: form.roles.value
+    };
+
+    const url = id ? `/api/events/${id}` : '/api/events';
+    const method = id ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(res => {
+        if (res.ok) {
+            hideModal();
+            loadEvents(currentStatus);
+        } else {
+            alert('保存失败');
+        }
+    }).catch(err => {
+        console.error('保存失败:', err);
+        alert('保存失败');
+    });
+});
+
+// ESC 关闭
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') hideModal();
+});
+
+// 点击背景关闭
+document.getElementById('event-modal').addEventListener('click', function(e) {
+    if (e.target === this) hideModal();
+});
+
+// 初始加载
+loadEvents('active');
+
+// 显示文章预览 - 通过 AJAX 获取文章详情
+function showArticlePreview(articleId) {
+    const modal = document.getElementById('article-preview-modal');
+
+    // 显示加载状态
+    document.getElementById('preview-article-title').textContent = '加载中...';
+    document.getElementById('preview-article-source').textContent = '';
+    document.getElementById('preview-article-time').textContent = '';
+    document.getElementById('preview-article-content').textContent = '';
+    document.getElementById('preview-article-link').href = '#';
+    document.getElementById('preview-similar-links').innerHTML = '';
+    modal.classList.remove('hidden');
+
+    // 通过 AJAX 获取文章详情
+    fetch(`/api/articles/${articleId}`)
+        .then(res => {
+            if (!res.ok) throw new Error('文章不存在');
+            return res.json();
+        })
+        .then(article => {
+            document.getElementById('preview-article-title').textContent = article.title || '';
+            document.getElementById('preview-article-source').textContent = article.feed_title || '未知来源';
+            document.getElementById('preview-article-time').textContent = formatRelativeTime(article.published_at || '');
+            document.getElementById('preview-article-link').href = article.link || '#';
+
+            // 获取内容
+            let content = article.ai_summary || article.summary || article.content_cleaned || article.content;
+            if (!content || content.trim() === '') {
+                content = '该文章暂无预览内容，请点击"查看原文"访问完整内容。';
+            }
+            document.getElementById('preview-article-content').textContent = content;
+
+            // 翻译切换
+            const evtTranslateContainer = document.getElementById('evt-translate-toggle-container');
+            const evtTranslateBtn = document.getElementById('evt-translate-toggle');
+            if (article.translated_content) {
+                evtTranslateContainer.classList.remove('hidden');
+                evtTranslateBtn.textContent = '中文翻译';
+                evtTranslateBtn.dataset.showingTranslation = 'false';
+                window._evtOriginalContent = content;
+                window._evtTranslatedContent = article.translated_content;
+            } else {
+                evtTranslateContainer.classList.add('hidden');
+            }
+
+            // 获取原文按钮
+            const evtFetchContainer = document.getElementById('evt-fetch-original-container');
+            const evtFetchBtn = document.getElementById('evt-fetch-original-btn');
+            if (article.link) {
+                evtFetchContainer.classList.remove('hidden');
+                evtFetchBtn.textContent = '获取原文';
+                evtFetchBtn.disabled = false;
+                evtFetchBtn.dataset.articleId = article.id;
+            } else {
+                evtFetchContainer.classList.add('hidden');
+            }
+
+            // 显示相似文章链接（从当前文章的相似文章缓存中获取）
+            const similarContainer = document.getElementById('preview-similar-links');
+            const similarArticles = window.currentSimilarArticles ? window.currentSimilarArticles[articleId] : null;
+            if (similarArticles && similarArticles.length > 0) {
+                similarContainer.innerHTML = '<span class="text-gray-500 text-sm mr-2">相关文章：</span>' +
+                    similarArticles.map((sa, i) =>
+                        `<a href="javascript:void(0)" onclick="showArticlePreview(${sa.id})" class="text-blue-500 hover:underline text-sm">[${i + 2}]</a>`
+                    ).join(' ');
+            } else {
+                similarContainer.innerHTML = '';
+            }
+        })
+        .catch(err => {
+            console.error('获取文章失败:', err);
+            document.getElementById('preview-article-title').textContent = '获取失败';
+            document.getElementById('preview-article-content').textContent = '无法加载文章内容，请稍后重试。';
+        });
+}
+
+function toggleEvtTranslation() {
+    const btn = document.getElementById('evt-translate-toggle');
+    const content = document.getElementById('preview-article-content');
+    if (btn.dataset.showingTranslation === 'true') {
+        content.textContent = window._evtOriginalContent;
+        btn.textContent = '中文翻译';
+        btn.dataset.showingTranslation = 'false';
+    } else {
+        content.textContent = window._evtTranslatedContent;
+        btn.textContent = '原文';
+        btn.dataset.showingTranslation = 'true';
+    }
+}
+
+// 获取原文
+async function fetchEvtOriginalContent() {
+    const btn = document.getElementById('evt-fetch-original-btn');
+    const contentEl = document.getElementById('preview-article-content');
+    btn.textContent = '获取中...';
+    btn.disabled = true;
+    try {
+        const articleId = btn.dataset.articleId;
+        const resp = await fetch(`/api/articles/${articleId}/fetch-original`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = data.content;
+            contentEl.textContent = tmp.textContent || tmp.innerText;
+            window._evtOriginalContent = contentEl.textContent;
+            btn.textContent = '已获取原文';
+        } else {
+            alert('获取失败: ' + data.error);
+            btn.textContent = '获取原文';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        alert('请求失败: ' + e.message);
+        btn.textContent = '获取原文';
+        btn.disabled = false;
+    }
+}
+
+// 隐藏文章预览
+function hideArticlePreview() {
+    document.getElementById('article-preview-modal').classList.add('hidden');
+}
+</script>
+{{end}}

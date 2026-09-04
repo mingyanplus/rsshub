@@ -1,0 +1,686 @@
+{{define "content"}}
+<div class="space-y-6">
+    <!-- 操作栏 -->
+    <div class="flex justify-end">
+        <button onclick="showAddFeedModal()"
+                class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">
+            ➕ 添加订阅
+        </button>
+    </div>
+
+    <!-- 订阅列表 -->
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+        <table class="w-full">
+            <thead class="bg-gray-50 border-b border-gray-100">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">订阅源</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">类型</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">分类</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">刷新间隔</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">最后刷新</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100" id="feeds-list">
+                {{range .Feeds}}
+                <tr class="hover:bg-gray-50 transition">
+                    <td class="px-6 py-4">
+                        <div>
+                            <div class="font-medium text-gray-900">{{.Title}}</div>
+                            <div class="text-sm text-gray-500 truncate max-w-md">{{.URL}}</div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                            {{if eq .SourceType "html"}}bg-purple-100 text-purple-800
+                            {{else if eq .SourceType "json"}}bg-orange-100 text-orange-800
+                            {{else}}bg-blue-100 text-blue-800{{end}}">
+                            {{if eq .SourceType "html"}}HTML
+                            {{else if eq .SourceType "json"}}JSON
+                            {{else}}RSS{{end}}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-500">
+                        {{if .CategoryName}}
+                        <span class="inline-flex items-center gap-1">
+                            <span>{{.CategoryIcon}}</span>
+                            <span>{{.CategoryName}}</span>
+                        </span>
+                        {{else}}
+                        <span class="text-gray-400">未分类</span>
+                        {{end}}
+                    </td>
+                    <td class="px-6 py-4">
+                        {{if .IsActive}}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            活跃
+                        </span>
+                        {{else}}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            暂停
+                        </span>
+                        {{end}}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-500">
+                        {{.FetchInterval}} 分钟
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-500">
+                        {{if .LastFetched}}
+                        {{.LastFetched}}
+                        {{else}}
+                        未刷新
+                        {{end}}
+                    </td>
+                    <td class="px-6 py-4 text-right space-x-2">
+                        <button onclick="refreshFeed({{.ID}})"
+                                class="text-blue-600 hover:text-blue-800 text-sm">
+                            🔄 刷新
+                        </button>
+                        <button onclick="editFeed({{.ID}})"
+                                class="text-gray-600 hover:text-gray-800 text-sm">
+                            ✏️ 编辑
+                        </button>
+                        <button onclick="deleteFeed({{.ID}})"
+                                class="text-red-600 hover:text-red-800 text-sm">
+                            🗑️ 删除
+                        </button>
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 添加/编辑订阅模态框 -->
+<div id="feed-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+        <h2 class="text-xl font-bold text-gray-800 mb-4" id="feed-modal-title">添加订阅</h2>
+        <form id="feed-form" onsubmit="return submitFeedForm(event)">
+            <input type="hidden" name="id" id="feed-id" value="">
+            <div class="space-y-4">
+                <!-- 数据源类型 -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">数据源类型</label>
+                    <div class="flex gap-2">
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="source_type" value="rss" checked class="hidden peer">
+                            <div class="peer-checked:bg-blue-50 peer-checked:border-blue-500 peer-checked:text-blue-700 border-2 border-gray-200 rounded-lg p-2 text-center text-sm font-medium transition">
+                                RSS / Atom
+                            </div>
+                        </label>
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="source_type" value="html" class="hidden peer">
+                            <div class="peer-checked:bg-purple-50 peer-checked:border-purple-500 peer-checked:text-purple-700 border-2 border-gray-200 rounded-lg p-2 text-center text-sm font-medium transition">
+                                HTML 页面
+                            </div>
+                        </label>
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="source_type" value="json" class="hidden peer">
+                            <div class="peer-checked:bg-orange-50 peer-checked:border-orange-500 peer-checked:text-orange-700 border-2 border-gray-200 rounded-lg p-2 text-center text-sm font-medium transition">
+                                JSON API
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- URL -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">订阅地址 *</label>
+                    <input type="text"
+                           name="url"
+                           id="feed-url"
+                           required
+                           placeholder="https://example.com/feed.xml"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+
+                <!-- 标题 -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">标题</label>
+                    <input type="text"
+                           name="title"
+                           id="feed-title"
+                           placeholder="自动获取"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+
+                <!-- 内容过滤 -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">内容过滤 <span class="text-gray-400 font-normal text-xs">（可选）</span></label>
+                    <textarea name="content_filter"
+                              id="feed-content-filter"
+                              rows="4"
+                              placeholder="每行一条，抓取正文时整行剔除匹配内容&#10;默认按正则匹配，正则无效时按纯文本包含匹配；# 开头为注释&#10;示例：&#10;在花频道.*投稿通道&#10;加入我们的讨论群"
+                              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs leading-5"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">用于剔除频道介绍、推广语等无关内容，正文更干净、LLM 消耗 token 更少</p>
+                </div>
+
+                <!-- ========== HTML 配置面板 ========== -->
+                <div id="html-config" class="hidden space-y-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                    <h3 class="text-sm font-semibold text-purple-800">HTML 提取配置</h3>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">列表项选择器 * (CSS)</label>
+                        <input type="text" id="html-item-selector" placeholder="div.news-item"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">标题选择器</label>
+                            <input type="text" id="html-title-selector" placeholder="h2 a"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">链接选择器</label>
+                            <input type="text" id="html-link-selector" placeholder="h2 a"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">日期选择器</label>
+                            <input type="text" id="html-date-selector" placeholder="span.date"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">内容选择器</label>
+                            <input type="text" id="html-content-selector" placeholder="div.summary"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Base URL（用于相对链接补全）</label>
+                        <input type="text" id="html-base-url" placeholder="留空则使用页面 URL"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
+                    </div>
+                </div>
+
+                <!-- ========== JSON 配置面板 ========== -->
+                <div id="json-config" class="hidden space-y-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
+                    <h3 class="text-sm font-semibold text-orange-800">JSON API 配置</h3>
+                    <!-- Curl 导入 -->
+                    <div>
+                        <button type="button" onclick="showCurlImport()"
+                                class="text-xs text-orange-700 hover:text-orange-900 underline mb-2">
+                            从 curl 命令导入
+                        </button>
+                        <div id="curl-import-area" class="hidden space-y-2">
+                            <textarea id="curl-command" rows="3" placeholder="粘贴浏览器复制的 curl 命令..."
+                                      class="w-full px-2 py-1.5 text-xs font-mono border border-gray-300 rounded focus:ring-1 focus:ring-orange-400"></textarea>
+                            <div class="flex gap-2">
+                                <button type="button" onclick="parseCurlCommand()"
+                                        class="px-3 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600">
+                                    解析并填充
+                                </button>
+                                <button type="button" onclick="document.getElementById('curl-import-area').classList.add('hidden')"
+                                        class="px-3 py-1 text-xs text-gray-500 hover:text-gray-700">
+                                    取消
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">请求方法</label>
+                            <select id="json-method" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-orange-400">
+                                <option value="GET">GET</option>
+                                <option value="POST">POST</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">请求体</label>
+                            <input type="text" id="json-body" placeholder='{"key":"value"}'
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-orange-400">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">自定义 Headers（JSON 格式）</label>
+                        <textarea id="json-headers" rows="2" placeholder='{"Authorization": "Bearer xxx"}'
+                                  class="w-full px-2 py-1.5 text-xs font-mono border border-gray-300 rounded focus:ring-1 focus:ring-orange-400"></textarea>
+                    </div>
+                    <hr class="border-orange-200">
+                    <h4 class="text-xs font-semibold text-orange-700">数据提取（jq 语法）</h4>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">列表路径 * <span class="text-gray-400">.data.list[]</span></label>
+                        <input type="text" id="json-items-path" placeholder=".data.list[]"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-orange-400">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">标题字段 <span class="text-gray-400">.title</span></label>
+                            <input type="text" id="json-title-field" placeholder=".title"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-orange-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">链接字段 <span class="text-gray-400">.url</span></label>
+                            <input type="text" id="json-link-field" placeholder=".url"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-orange-400">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">日期字段</label>
+                            <input type="text" id="json-date-field" placeholder=".published_at"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-orange-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">内容字段</label>
+                            <input type="text" id="json-content-field" placeholder=".content.text"
+                                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-orange-400">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 测试提取按钮 -->
+                <div id="test-source-area" class="hidden">
+                    <button type="button" onclick="testSource()"
+                            id="test-btn"
+                            class="w-full px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition flex items-center justify-center gap-2">
+                        🔍 测试提取
+                    </button>
+                    <div id="test-result" class="hidden mt-3 space-y-2"></div>
+                </div>
+
+                <!-- 分类 -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">默认分类</label>
+                    <select name="category_id"
+                            id="feed-category"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">未分类</option>
+                        {{range .Categories}}
+                        <option value="{{.ID}}">{{.Icon}} {{.Name}}</option>
+                        {{end}}
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">该订阅源的文章将自动分配到此分类</p>
+                </div>
+
+                <!-- 刷新间隔 -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">刷新间隔（分钟）</label>
+                    <input type="number"
+                           name="fetch_interval"
+                           id="feed-interval"
+                           value="30"
+                           min="5"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+
+                <!-- 启用 -->
+                <div class="flex items-center">
+                    <input type="checkbox"
+                           name="is_active"
+                           id="feed-active"
+                           checked
+                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                    <label for="feed-active" class="ml-2 block text-sm text-gray-700">
+                        启用订阅
+                    </label>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button type="button"
+                        onclick="closeFeedModal()"
+                        class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
+                    取消
+                </button>
+                <button type="submit"
+                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                    保存
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+let editingFeedId = null;
+let categories = {};
+
+// 初始化分类数据
+{{range .Categories}}
+categories[{{.ID}}] = {name: "{{.Name}}", icon: "{{.Icon}}"};
+{{end}}
+
+// ========== Source Type 切换 ==========
+document.querySelectorAll('input[name="source_type"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        toggleSourceConfig(this.value);
+    });
+});
+
+function toggleSourceConfig(type) {
+    const htmlConfig = document.getElementById('html-config');
+    const jsonConfig = document.getElementById('json-config');
+    const testArea = document.getElementById('test-source-area');
+    const urlInput = document.getElementById('feed-url');
+
+    htmlConfig.classList.add('hidden');
+    jsonConfig.classList.add('hidden');
+
+    if (type === 'html') {
+        htmlConfig.classList.remove('hidden');
+        testArea.classList.remove('hidden');
+        urlInput.placeholder = 'https://example.com/news';
+    } else if (type === 'json') {
+        jsonConfig.classList.remove('hidden');
+        testArea.classList.remove('hidden');
+        urlInput.placeholder = 'https://api.example.com/v1/data';
+    } else {
+        testArea.classList.add('hidden');
+        urlInput.placeholder = 'https://example.com/feed.xml';
+    }
+}
+
+function getSelectedSourceType() {
+    return document.querySelector('input[name="source_type"]:checked').value;
+}
+
+// ========== 构建 source_config ==========
+function buildSourceConfig() {
+    const type = getSelectedSourceType();
+    if (type === 'html') {
+        const config = {};
+        const itemSel = document.getElementById('html-item-selector').value.trim();
+        if (!itemSel) return { error: 'HTML 源必须填写列表项选择器' };
+        config.item_selector = itemSel;
+        config.url = document.getElementById('feed-url').value.trim();
+        if (document.getElementById('html-title-selector').value.trim()) config.title_selector = document.getElementById('html-title-selector').value.trim();
+        if (document.getElementById('html-link-selector').value.trim()) config.link_selector = document.getElementById('html-link-selector').value.trim();
+        if (document.getElementById('html-date-selector').value.trim()) config.date_selector = document.getElementById('html-date-selector').value.trim();
+        if (document.getElementById('html-content-selector').value.trim()) config.content_selector = document.getElementById('html-content-selector').value.trim();
+        if (document.getElementById('html-base-url').value.trim()) config.base_url = document.getElementById('html-base-url').value.trim();
+        return config;
+    }
+    if (type === 'json') {
+        const config = {};
+        config.url = document.getElementById('feed-url').value.trim();
+        const itemsPath = document.getElementById('json-items-path').value.trim();
+        if (!itemsPath) return { error: 'JSON 源必须填写列表路径' };
+        config.items_path = itemsPath;
+        if (document.getElementById('json-method').value !== 'GET') config.method = document.getElementById('json-method').value;
+        if (document.getElementById('json-body').value.trim()) config.body = document.getElementById('json-body').value.trim();
+        const headersStr = document.getElementById('json-headers').value.trim();
+        if (headersStr) {
+            try { config.headers = JSON.parse(headersStr); } catch(e) { return { error: 'Headers 格式错误: ' + e.message }; }
+        }
+        if (document.getElementById('json-title-field').value.trim()) config.title_field = document.getElementById('json-title-field').value.trim();
+        if (document.getElementById('json-link-field').value.trim()) config.link_field = document.getElementById('json-link-field').value.trim();
+        if (document.getElementById('json-date-field').value.trim()) config.date_field = document.getElementById('json-date-field').value.trim();
+        if (document.getElementById('json-content-field').value.trim()) config.content_field = document.getElementById('json-content-field').value.trim();
+        return config;
+    }
+    return null;
+}
+
+// ========== 测试提取 ==========
+function testSource() {
+    const type = getSelectedSourceType();
+    const url = document.getElementById('feed-url').value.trim();
+    if (!url) { alert('请先填写地址'); return; }
+
+    const config = buildSourceConfig();
+    if (config.error) { alert(config.error); return; }
+
+    const btn = document.getElementById('test-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 测试中...';
+
+    const resultDiv = document.getElementById('test-result');
+    resultDiv.classList.add('hidden');
+
+    fetch('/api/feeds/test-source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            source_type: type,
+            source_config: config ? JSON.stringify(config) : '{}',
+            url: url
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.textContent = '🔍 测试提取';
+        resultDiv.classList.remove('hidden');
+
+        if (data.error) {
+            resultDiv.innerHTML = '<div class="p-2 bg-red-50 text-red-700 text-sm rounded">' + data.error + '</div>';
+            return;
+        }
+
+        let html = '<div class="p-2 bg-green-50 text-green-700 text-sm rounded mb-2">✅ 提取成功，共 ' + (data.item_count || 0) + ' 条结果</div>';
+        if (data.preview && data.preview.length > 0) {
+            data.preview.forEach((item, i) => {
+                html += '<div class="p-2 bg-gray-50 rounded text-sm">' +
+                    '<div class="font-medium">' + (i+1) + '. ' + (item.title || '无标题') + '</div>' +
+                    (item.link ? '<div class="text-xs text-gray-500 truncate">' + item.link + '</div>' : '') +
+                    (item.content ? '<div class="text-xs text-gray-600 mt-1 line-clamp-2">' + item.content.substring(0, 100) + '</div>' : '') +
+                    '</div>';
+            });
+        }
+        resultDiv.innerHTML = html;
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.textContent = '🔍 测试提取';
+        resultDiv.classList.remove('hidden');
+        resultDiv.innerHTML = '<div class="p-2 bg-red-50 text-red-700 text-sm rounded">请求失败: ' + err.message + '</div>';
+    });
+}
+
+// ========== Curl 导入 ==========
+function showCurlImport() {
+    document.getElementById('curl-import-area').classList.toggle('hidden');
+}
+
+function parseCurlCommand() {
+    const cmd = document.getElementById('curl-command').value.trim();
+    if (!cmd) { alert('请粘贴 curl 命令'); return; }
+
+    fetch('/api/feeds/parse-curl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) { alert(data.error); return; }
+
+        if (data.url) document.getElementById('feed-url').value = data.url;
+        if (data.method && data.method !== 'GET') {
+            document.getElementById('json-method').value = data.method;
+        }
+        if (data.body) document.getElementById('json-body').value = data.body;
+        if (data.headers && Object.keys(data.headers).length > 0) {
+            document.getElementById('json-headers').value = JSON.stringify(data.headers, null, 2);
+        }
+        document.getElementById('curl-import-area').classList.add('hidden');
+        alert('已填充 URL、Method、Headers、Body');
+    })
+    .catch(err => {
+        alert('解析失败: ' + err.message);
+    });
+}
+
+// ========== Modal 控制 ==========
+function showAddFeedModal() {
+    document.getElementById('feed-modal-title').textContent = '添加订阅';
+    document.getElementById('feed-form').reset();
+    document.getElementById('feed-id').value = '';
+    document.getElementById('feed-url').removeAttribute('readonly');
+    editingFeedId = null;
+    toggleSourceConfig('rss');
+    document.getElementById('test-result').classList.add('hidden');
+    // 重置所有自定义字段
+    ['html-item-selector','html-title-selector','html-link-selector','html-date-selector',
+     'html-content-selector','html-base-url','json-items-path','json-title-field',
+     'json-link-field','json-date-field','json-content-field','json-body','json-headers',
+     'curl-command'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    document.getElementById('json-method').value = 'GET';
+    document.getElementById('feed-modal').classList.remove('hidden');
+}
+
+function closeFeedModal() {
+    document.getElementById('feed-modal').classList.add('hidden');
+    editingFeedId = null;
+}
+
+function editFeed(id) {
+    fetch(`/api/feeds/${id}`)
+        .then(res => res.json())
+        .then(feed => {
+            document.getElementById('feed-modal-title').textContent = '编辑订阅';
+            document.getElementById('feed-id').value = feed.id;
+            document.getElementById('feed-url').value = feed.url;
+            document.getElementById('feed-url').setAttribute('readonly', true);
+            document.getElementById('feed-title').value = feed.title || '';
+            document.getElementById('feed-interval').value = feed.fetch_interval || 30;
+            document.getElementById('feed-active').checked = feed.is_active !== false;
+            document.getElementById('feed-content-filter').value = feed.content_filter || '';
+
+            // 设置分类
+            if (feed.category_id) {
+                document.getElementById('feed-category').value = feed.category_id;
+            } else {
+                document.getElementById('feed-category').value = '';
+            }
+
+            // 设置 source_type
+            const sourceType = feed.source_type || 'rss';
+            const radio = document.querySelector(`input[name="source_type"][value="${sourceType}"]`);
+            if (radio) radio.checked = true;
+            toggleSourceConfig(sourceType);
+
+            // 填充 source_config
+            if (feed.source_config && feed.source_config !== '{}') {
+                try {
+                    const config = JSON.parse(feed.source_config);
+                    if (sourceType === 'html') {
+                        if (config.item_selector) document.getElementById('html-item-selector').value = config.item_selector;
+                        if (config.title_selector) document.getElementById('html-title-selector').value = config.title_selector;
+                        if (config.link_selector) document.getElementById('html-link-selector').value = config.link_selector;
+                        if (config.date_selector) document.getElementById('html-date-selector').value = config.date_selector;
+                        if (config.content_selector) document.getElementById('html-content-selector').value = config.content_selector;
+                        if (config.base_url) document.getElementById('html-base-url').value = config.base_url;
+                    } else if (sourceType === 'json') {
+                        if (config.method) document.getElementById('json-method').value = config.method;
+                        if (config.body) document.getElementById('json-body').value = config.body;
+                        if (config.headers) document.getElementById('json-headers').value = JSON.stringify(config.headers, null, 2);
+                        if (config.items_path) document.getElementById('json-items-path').value = config.items_path;
+                        if (config.title_field) document.getElementById('json-title-field').value = config.title_field;
+                        if (config.link_field) document.getElementById('json-link-field').value = config.link_field;
+                        if (config.date_field) document.getElementById('json-date-field').value = config.date_field;
+                        if (config.content_field) document.getElementById('json-content-field').value = config.content_field;
+                    }
+                } catch(e) {}
+            }
+
+            document.getElementById('test-result').classList.add('hidden');
+            editingFeedId = id;
+            document.getElementById('feed-modal').classList.remove('hidden');
+        })
+        .catch(err => {
+            alert('获取订阅信息失败: ' + err.message);
+        });
+}
+
+function submitFeedForm(event) {
+    event.preventDefault();
+
+    const form = document.getElementById('feed-form');
+    const formData = new FormData(form);
+    const sourceType = getSelectedSourceType();
+
+    const data = {
+        url: formData.get('url'),
+        title: formData.get('title') || '',
+        category_id: formData.get('category_id') ? parseInt(formData.get('category_id')) : null,
+        fetch_interval: parseInt(formData.get('fetch_interval')) || 30,
+        is_active: document.getElementById('feed-active').checked,
+        source_type: sourceType,
+        content_filter: (formData.get('content_filter') || '').trim()
+    };
+
+    // 构建 source_config
+    if (sourceType !== 'rss') {
+        const config = buildSourceConfig();
+        if (config.error) { alert(config.error); return false; }
+        data.source_config = config ? JSON.stringify(config) : '{}';
+    }
+
+    const isEdit = editingFeedId !== null;
+    const url = isEdit ? `/api/feeds/${editingFeedId}` : '/api/feeds';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => {
+        if (response.ok) {
+            closeFeedModal();
+            location.reload();
+        } else {
+            return response.text().then(text => {
+                alert('保存失败: ' + text);
+            });
+        }
+    })
+    .catch(err => {
+        alert('请求失败: ' + err.message);
+    });
+
+    return false;
+}
+
+function refreshFeed(id) {
+    fetch(`/api/feeds/${id}/refresh`, { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            alert('刷新任务已提交');
+            setTimeout(() => location.reload(), 2000);
+        })
+        .catch(err => {
+            alert('刷新失败: ' + err.message);
+        });
+}
+
+function deleteFeed(id) {
+    if (!confirm('确定要删除这个订阅吗？')) {
+        return;
+    }
+
+    fetch(`/api/feeds/${id}`, { method: 'DELETE' })
+        .then(response => {
+            if (response.ok) {
+                location.reload();
+            } else {
+                return response.text().then(text => {
+                    alert('删除失败: ' + text);
+                });
+            }
+        })
+        .catch(err => {
+            alert('请求失败: ' + err.message);
+        });
+}
+
+// ESC 关闭
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeFeedModal();
+});
+
+// 点击背景关闭
+document.getElementById('feed-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeFeedModal();
+});
+</script>
+{{end}}

@@ -1,0 +1,292 @@
+{{define "content"}}
+<div class="space-y-6">
+    <!-- 操作栏 -->
+    <div class="flex justify-between items-center">
+        <p class="text-gray-500 text-sm">配置关注主题，系统会根据关键词自动匹配文章标签</p>
+        <button onclick="showAddRuleModal()"
+                class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition flex items-center gap-2">
+            <span>➕</span> 添加规则
+        </button>
+    </div>
+
+    <!-- 规则列表 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" id="rules-list">
+        {{range .Rules}}
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition"
+             id="rule-{{.ID}}">
+            <div class="flex items-start justify-between mb-3">
+                <a href="/followed?rule={{.ID}}" class="font-semibold text-gray-900 hover:text-blue-600 transition">
+                    {{.Name}}
+                </a>
+                <div class="flex items-center gap-1">
+                    <button onclick="editRule({{.ID}})"
+                              class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded transition"
+                              title="编辑">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                        </svg>
+                    </button>
+                    <button onclick="deleteRule({{.ID}})"
+                              class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                              title="删除">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            {{if .Description}}
+            <p class="text-gray-500 text-sm mb-3 line-clamp-2">{{.Description}}</p>
+            {{end}}
+
+            {{if .Keywords}}
+            <div class="flex flex-wrap gap-1.5 mb-2">
+                {{range split .Keywords ","}}
+                <span class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">{{.}}</span>
+                {{end}}
+            </div>
+            {{end}}
+
+            {{if .EnablePush}}
+            <div class="flex items-center gap-1.5 text-xs text-gray-500">
+                <span class="text-green-500">●</span>
+                <span>推送:
+                    {{ $channels := split .PushChannels "," }}
+                    {{range $i, $ch := $channels}}
+                        {{if $i}}, {{end}}
+                        {{if eq $ch "web"}}🌐 Web{{end}}
+                        {{if eq $ch "email"}}📧 邮件{{end}}
+                        {{if eq $ch "gotify"}}🔔 Gotify{{end}}
+                        {{if eq $ch "qqbot"}}🤖 QQBot{{end}}
+                        {{if eq $ch "webhook"}}🔗 Webhook{{end}}
+                    {{end}}
+                </span>
+            </div>
+            {{end}}
+        </div>
+        {{else}}
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+            <div class="text-6xl mb-4">⭐</div>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">暂无关注规则</h3>
+            <p class="text-gray-500 mb-4">添加关注规则后，系统会根据关键词自动匹配文章</p>
+            <button onclick="showAddRuleModal()"
+                      class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">
+                添加第一个规则
+            </button>
+        </div>
+        {{end}}
+    </div>
+</div>
+
+<!-- 添加/编辑规则模态框 -->
+<div id="rule-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4" id="rule-modal-title">➕ 添加关注规则</h3>
+        <form id="rule-form" onsubmit="submitRuleForm(event)">
+            <input type="hidden" name="id" id="rule-id" value="">
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">规则名称 *</label>
+                    <input type="text"
+                           name="name"
+                           id="rule-name"
+                           required
+                           placeholder="例如：AI 动态"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">规则描述</label>
+                    <textarea name="description"
+                                 id="rule-description"
+                                 rows="2"
+                                 placeholder="描述你想关注的内容"
+                                 class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">关键词（逗号分隔）*</label>
+                    <input type="text"
+                           name="keywords"
+                           id="rule-keywords"
+                           required
+                           placeholder="AI,GPT,LLM,机器学习"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    <p class="text-xs text-gray-400 mt-1">关键词用于匹配文章的标签和标题</p>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox"
+                               name="is_active"
+                               id="rule-active"
+                               checked
+                               class="w-4 h-4 text-blue-500 rounded focus:ring-blue-500">
+                        <span class="text-sm text-gray-700">启用规则</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox"
+                               name="enable_push"
+                               id="rule-push"
+                               class="w-4 h-4 text-blue-500 rounded focus:ring-blue-500">
+                        <span class="text-sm text-gray-700">启用推送</span>
+                    </label>
+                </div>
+
+                <div id="push-channels-section" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">推送渠道</label>
+                    <div class="flex flex-wrap gap-2">
+                        <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+                            <input type="checkbox" name="channels" value="web" class="w-4 h-4 text-blue-500 rounded">
+                            <span class="text-sm">🌐 Web</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+                            <input type="checkbox" name="channels" value="email" class="w-4 h-4 text-blue-500 rounded">
+                            <span class="text-sm">📧 邮件</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+                            <input type="checkbox" name="channels" value="gotify" class="w-4 h-4 text-blue-500 rounded">
+                            <span class="text-sm">🔔 Gotify</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+                            <input type="checkbox" name="channels" value="qqbot" class="w-4 h-4 text-blue-500 rounded">
+                            <span class="text-sm">🤖 QQBot</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 mt-6">
+                <button type="button"
+                        onclick="closeRuleModal()"
+                        class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
+                    取消
+                </button>
+                <button type="submit"
+                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                    保存
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+let editingRuleId = null;
+
+// 推送选项联动
+document.getElementById('rule-push').addEventListener('change', function() {
+    document.getElementById('push-channels-section').classList.toggle('hidden', !this.checked);
+});
+
+function showAddRuleModal() {
+    editingRuleId = null;
+    document.getElementById('rule-modal-title').textContent = '➕ 添加关注规则';
+    document.getElementById('rule-form').reset();
+    document.getElementById('rule-id').value = '';
+    document.getElementById('rule-push').checked = false;
+    document.getElementById('push-channels-section').classList.add('hidden');
+    document.querySelectorAll('input[name="channels"]').forEach(cb => cb.checked = false);
+    document.getElementById('rule-modal').classList.remove('hidden');
+}
+
+function closeRuleModal() {
+    document.getElementById('rule-modal').classList.add('hidden');
+    editingRuleId = null;
+}
+
+function editRule(id) {
+    editingRuleId = id;
+    fetch(`/api/rules/${id}`)
+        .then(res => res.json())
+        .then(rule => {
+            document.getElementById('rule-modal-title').textContent = '✏️ 编辑关注规则';
+            document.getElementById('rule-id').value = rule.id;
+            document.getElementById('rule-name').value = rule.name;
+            document.getElementById('rule-description').value = rule.description || '';
+            document.getElementById('rule-keywords').value = rule.keywords || '';
+            document.getElementById('rule-push').checked = rule.enable_push;
+            document.getElementById('push-channels-section').classList.toggle('hidden', !rule.enable_push);
+
+            const channels = (rule.push_channels || '').split(',');
+            document.querySelectorAll('input[name="channels"]').forEach(cb => {
+                cb.checked = channels.includes(cb.value);
+            });
+
+            document.getElementById('rule-modal').classList.remove('hidden');
+        });
+}
+
+function submitRuleForm(event) {
+    event.preventDefault();
+
+    const form = document.getElementById('rule-form');
+    const formData = new FormData(form);
+
+    const data = {
+        name: formData.get('name'),
+        description: formData.get('description') || '',
+        keywords: formData.get('keywords') || '',
+        enable_push: formData.get('enable_push') === 'on',
+        push_channels: formData.getAll('channels').join(',')
+    };
+
+    const isEdit = editingRuleId !== null;
+    const url = isEdit ? `/api/rules/${editingRuleId}` : '/api/rules';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(res => res.json())
+    .then(result => {
+        if (result.success || result.id) {
+            closeRuleModal();
+            location.reload();
+        } else {
+            alert('保存失败: ' + (result.message || '未知错误'));
+        }
+    })
+    .catch(err => {
+        console.error('Submit error:', err);
+        alert('保存失败');
+    });
+}
+
+function deleteRule(id) {
+    if (!confirm('确定要删除这个规则吗？')) return;
+
+    fetch(`/api/rules/${id}`, { method: 'DELETE' })
+        .then(res => {
+            if (res.status === 204) {
+                const ruleEl = document.getElementById(`rule-${id}`);
+                if (ruleEl) ruleEl.remove();
+                const rulesList = document.getElementById('rules-list');
+                if (rulesList && rulesList.children.length === 0) {
+                    location.reload();
+                }
+            } else {
+                alert('删除失败');
+            }
+        })
+        .catch(err => {
+            console.error('Delete error:', err);
+            alert('删除失败');
+        });
+}
+
+// ESC 关闭
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeRuleModal();
+});
+
+// 点击背景关闭
+document.getElementById('rule-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeRuleModal();
+});
+</script>
+{{end}}

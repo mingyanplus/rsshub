@@ -1,0 +1,438 @@
+{{define "content"}}
+<div class="flex flex-col h-[calc(100vh-8rem)]">
+    <!-- 顶部：设置区域 -->
+    <div class="flex-shrink-0 mb-4">
+        <div class="flex justify-between items-center mb-4">
+            <p class="text-gray-500 text-sm">AI 自动生成每日新闻摘要报告</p>
+            <div class="flex gap-2">
+                <button id="btn-morning"
+                          hx-post="/api/reports/generate"
+                          hx-vals='{"type":"morning"}'
+                          hx-target="#generate-result"
+                          hx-indicator="#btn-morning .loading-spinner"
+                          hx-disabled-elt="#btn-morning"
+                          class="generate-btn bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <span class="btn-icon">🌅</span>
+                    <span class="btn-text">生成早报</span>
+                    <span class="loading-spinner hidden">
+                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </span>
+                </button>
+                <button id="btn-evening"
+                          hx-post="/api/reports/generate"
+                          hx-vals='{"type":"evening"}'
+                          hx-target="#generate-result"
+                          hx-indicator="#btn-evening .loading-spinner"
+                          hx-disabled-elt="#btn-evening"
+                          class="generate-btn bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <span class="btn-icon">🌙</span>
+                    <span class="btn-text">生成晚报</span>
+                    <span class="loading-spinner hidden">
+                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </span>
+                </button>
+                <button id="btn-daily"
+                          hx-post="/api/reports/generate"
+                          hx-vals='{"type":"daily"}'
+                          hx-target="#generate-result"
+                          hx-indicator="#btn-daily .loading-spinner"
+                          hx-disabled-elt="#btn-daily"
+                          class="generate-btn bg-emerald-500 text-white px-4 py-2 rounded-lg hover:bg-emerald-600 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <span class="btn-icon">📅</span>
+                    <span class="btn-text">生成日报</span>
+                    <span class="loading-spinner hidden">
+                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <div id="generate-result"></div>
+
+        <!-- 早报晚报配置卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- 早报配置 -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+                        <span class="text-xl">🌅</span> 早报
+                    </h3>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox"
+                               id="morning-toggle"
+                               {{if .MorningEnabled}}checked{{end}}
+                               hx-post="/api/reports/config"
+                               hx-vals='{"type":"morning","action":"toggle"}'
+                               hx-trigger="change"
+                               hx-target="#morning-status"
+                               class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">推送时间</span>
+                        <span class="font-medium text-gray-900">{{.MorningTime}}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">内容范围</span>
+                        <span class="font-medium text-gray-900 text-xs">昨日 20:00 ~ 今日 8:00</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">自动推送</span>
+                        <span id="morning-status" class="font-medium {{if .MorningEnabled}}text-green-600{{else}}text-gray-400{{end}}">{{if .MorningEnabled}}已开启{{else}}已关闭{{end}}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 晚报配置 -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+                        <span class="text-xl">🌙</span> 晚报
+                    </h3>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox"
+                               id="evening-toggle"
+                               {{if .EveningEnabled}}checked{{end}}
+                               hx-post="/api/reports/config"
+                               hx-vals='{"type":"evening","action":"toggle"}'
+                               hx-trigger="change"
+                               hx-target="#evening-status"
+                               class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">推送时间</span>
+                        <span class="font-medium text-gray-900">{{.EveningTime}}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">内容范围</span>
+                        <span class="font-medium text-gray-900 text-xs">今日 8:00 ~ 20:00</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">自动推送</span>
+                        <span id="evening-status" class="font-medium {{if .EveningEnabled}}text-green-600{{else}}text-gray-400{{end}}">{{if .EveningEnabled}}已开启{{else}}已关闭{{end}}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 日报配置 -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+                        <span class="text-xl">📅</span> 日报
+                    </h3>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox"
+                               id="daily-toggle"
+                               {{if .DailyEnabled}}checked{{end}}
+                               hx-post="/api/reports/config"
+                               hx-vals='{"type":"daily","action":"toggle"}'
+                               hx-trigger="change"
+                               hx-target="#daily-status"
+                               class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">推送时间</span>
+                        <span class="font-medium text-gray-900">{{.DailyTime}}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">内容范围</span>
+                        <span class="font-medium text-gray-900 text-xs">今日 0:00 ~ 24:00</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">自动推送</span>
+                        <span id="daily-status" class="font-medium {{if .DailyEnabled}}text-green-600{{else}}text-gray-400{{end}}">{{if .DailyEnabled}}已开启{{else}}已关闭{{end}}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 下方：主从布局 -->
+    <div class="flex flex-col md:flex-row gap-4 flex-1 min-h-0">
+        <!-- 左侧：报告列表 -->
+        <div class="w-full md:w-[380px] flex-shrink-0 flex flex-col">
+            <!-- 筛选器 -->
+            <div class="bg-white rounded-xl shadow-sm p-3 mb-3 flex gap-3 items-center">
+                <select id="filter-type" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm flex-1"
+                        onchange="filterReports()">
+                    <option value="all">全部报告</option>
+                    <option value="morning">早报</option>
+                    <option value="evening">晚报</option>
+                </select>
+            </div>
+
+            <!-- 报告列表 -->
+            <div class="flex-1 md:min-h-0 overflow-y-auto bg-white rounded-xl shadow-sm">
+                <div id="reports-list" class="divide-y divide-gray-100">
+                    {{range .Reports}}
+                    <div class="report-item p-4 hover:bg-blue-50 cursor-pointer transition border-l-4 border-transparent"
+                         data-type="{{.Type}}"
+                         data-id="{{.ID}}"
+                         onclick="selectReport({{.ID}}, this)">
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="flex-1 min-w-0">
+                                <h4 class="font-medium text-gray-900 truncate text-sm">{{.Name}}</h4>
+                                <p class="text-xs text-gray-400">{{.CreatedAt}}</p>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 line-clamp-2 mb-2">{{.Summary}}</p>
+                        <div class="flex items-center gap-2 text-xs text-gray-400">
+                            <span>📄 {{.ArticleCount}} 篇</span>
+                            <span>•</span>
+                            <span>💡 {{.TopicCount}} 话题</span>
+                            {{if .SentAt}}
+                            <span class="text-green-500">✓ 已推送</span>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{else}}
+                    <div class="p-12 text-center">
+                        <div class="text-4xl mb-3">📭</div>
+                        <p class="text-gray-500">暂无历史报告</p>
+                        <p class="text-sm text-gray-400 mt-1">点击上方按钮手动生成</p>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：预览面板 -->
+        <div class="flex-1 flex flex-col min-w-0">
+            <div class="bg-white rounded-xl shadow-sm flex-1 md:overflow-hidden flex flex-col" id="report-preview">
+                <!-- 默认空状态 -->
+                <div id="preview-empty" class="flex-1 flex items-center justify-center text-gray-400">
+                    <div class="text-center">
+                        <div class="text-5xl mb-4">📰</div>
+                        <p>选择一份报告查看详情</p>
+                    </div>
+                </div>
+
+                <!-- 报告内容区域 -->
+                <div id="preview-content" class="hidden flex-1 flex flex-col overflow-hidden">
+                    <!-- 报告正文 -->
+                    <div class="md:flex-1 md:overflow-y-auto p-4">
+                        <div id="preview-body" class="prose prose-sm max-w-none report-content"></div>
+                    </div>
+
+                    <!-- 底部操作栏 -->
+                    <div class="p-3 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+                        <button id="btn-view-full" class="px-4 py-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition text-sm">
+                            📖 查看完整报告
+                        </button>
+                        <button id="btn-resend" class="px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition text-sm">
+                            📤 重新推送
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.report-content h1 { font-size: 1.25rem; font-weight: bold; margin: 0.75rem 0 0.5rem; color: #1f2937; }
+.report-content h2 { font-size: 1.1rem; font-weight: bold; margin: 0.75rem 0 0.5rem; color: #374151; }
+.report-content h3 { font-size: 1rem; font-weight: 600; margin: 0.5rem 0 0.25rem; color: #4b5563; }
+.report-content p { margin: 0.4rem 0; color: #4b5563; line-height: 1.6; }
+.report-content a { color: #1a6b3c; text-decoration: underline; }
+.report-content a:hover { color: #0f3a22; }
+.report-content ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.4rem 0; list-style-position: outside; }
+.report-content ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.4rem 0; list-style-position: outside; }
+.report-content li { margin: 0.2rem 0; color: #4b5563; display: list-item; }
+.report-content strong { font-weight: 600; color: #1f2937; }
+.report-content blockquote { border-left: 3px solid #d1d5db; padding-left: 1rem; margin: 0.4rem 0; color: #6b7280; }
+.report-content hr { border-color: #e5e7eb; margin: 0.75rem 0; }
+
+/* 选中状态 */
+.report-item.selected {
+    background-color: #f0f7f2;
+    border-left-color: #1a6b3c;
+}
+
+/* 按钮加载状态 */
+.generate-btn .loading-spinner {
+    display: none;
+}
+.generate-btn.htmx-request .loading-spinner {
+    display: inline-block;
+}
+.generate-btn.htmx-request .btn-icon {
+    display: none;
+}
+.generate-btn.htmx-request .btn-text::after {
+    content: '生成中...';
+}
+.generate-btn.htmx-request .btn-text {
+    font-size: 0;
+}
+.generate-btn.htmx-request .btn-text::after {
+    font-size: 0.875rem;
+}
+
+/* 成功提示动画 */
+.generate-success {
+    animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+</style>
+
+<!-- 引入 marked.js 用于 markdown 渲染 -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+let selectedReportId = null;
+
+// 渲染 markdown 为 HTML
+function renderMarkdown(text) {
+    if (!text) return '';
+    try {
+        return marked.parse(text);
+    } catch (e) {
+        console.error('Markdown 渲染失败:', e);
+        return text;
+    }
+}
+
+// 筛选报告
+function filterReports() {
+    const type = document.getElementById('filter-type').value;
+    const items = document.querySelectorAll('.report-item');
+
+    items.forEach(item => {
+        if (type === 'all' || item.dataset.type === type) {
+            item.style.display = '';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+// 选中报告
+function selectReport(id, element) {
+    // 移除之前的选中状态
+    document.querySelectorAll('.report-item').forEach(el => {
+        el.classList.remove('selected');
+    });
+
+    // 添加选中状态
+    element.classList.add('selected');
+    selectedReportId = id;
+
+    // 加载报告预览
+    loadReportPreview(id);
+}
+
+// 加载报告预览
+async function loadReportPreview(id) {
+    try {
+        // 不发送 HX-Request header，让服务端返回 JSON
+        const response = await fetch('/api/reports/' + id);
+        const data = await response.json();
+
+        // 隐藏空状态，显示内容
+        document.getElementById('preview-empty').classList.add('hidden');
+        document.getElementById('preview-content').classList.remove('hidden');
+
+        // 使用 Summary 字段，需要渲染 markdown 为 HTML
+        let content = data.report.summary || data.report.content || '暂无内容';
+        // 渲染 markdown 为 HTML
+        document.getElementById('preview-body').innerHTML = renderMarkdown(content);
+
+        // 设置按钮事件
+        document.getElementById('btn-resend').onclick = function() {
+            resendReport(id);
+        };
+        // 设置查看完整报告按钮
+        document.getElementById('btn-view-full').onclick = function() {
+            // 打开新窗口查看完整报告
+            window.open('/api/reports/' + id + '/full', '_blank');
+        };
+    } catch (err) {
+        console.error('加载报告详情失败:', err);
+    }
+}
+
+// 重新推送报告
+async function resendReport(id) {
+    try {
+        const response = await fetch('/api/reports/resend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ report_id: id })
+        });
+
+        if (response.ok) {
+            alert('推送成功！');
+        } else {
+            alert('推送失败');
+        }
+    } catch (err) {
+        console.error('推送失败:', err);
+        alert('推送失败');
+    }
+}
+
+// HTMX 事件处理 - 报告生成
+document.body.addEventListener('htmx:beforeRequest', function(evt) {
+    if (evt.detail.pathInfo.requestPath === '/api/reports/generate') {
+        const btn = evt.detail.elt;
+        btn.dataset.originalText = btn.querySelector('.btn-text').textContent;
+    }
+});
+
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+    if (evt.detail.pathInfo.requestPath === '/api/reports/generate') {
+        const btn = evt.detail.elt;
+        const resultDiv = document.getElementById('generate-result');
+
+        if (evt.detail.successful) {
+            const response = JSON.parse(evt.detail.xhr.response);
+            const typeNames = { morning: '早报', evening: '晚报', daily: '日报' };
+            const typeName = typeNames[response.type] || '报告';
+
+            resultDiv.innerHTML = '<div class="generate-success bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4 flex items-center justify-between">' +
+                '<div class="flex items-center gap-2">' +
+                    '<span class="text-lg">✅</span>' +
+                    '<span>' + typeName + '生成任务已提交，正在后台处理...</span>' +
+                '</div>' +
+                '<button onclick="this.parentElement.remove()" class="text-green-500 hover:text-green-700">✕</button>' +
+            '</div>';
+
+            // 3秒后自动刷新报告列表
+            setTimeout(() => {
+                htmx.trigger('#reports-list', 'refresh');
+                location.reload();
+            }, 3000);
+        } else {
+            const errorMsg = evt.detail.xhr.response || '未知错误';
+            resultDiv.innerHTML = '<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 flex items-center justify-between">' +
+                '<div class="flex items-center gap-2">' +
+                    '<span class="text-lg">❌</span>' +
+                    '<span>生成失败：' + errorMsg + '</span>' +
+                '</div>' +
+                '<button onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-700">✕</button>' +
+            '</div>';
+        }
+    }
+});
+</script>
+{{end}}

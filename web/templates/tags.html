@@ -1,0 +1,413 @@
+{{define "content"}}
+<div class="space-y-6">
+    <!-- 操作栏 -->
+    <div class="flex justify-between items-center">
+        <p class="text-gray-500 text-sm">AI 自动提取的标签，用于文章分类和检索</p>
+        <div class="flex gap-2">
+            <input type="text"
+                   id="tag-search"
+                   placeholder="搜索标签..."
+                   class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 w-64">
+        </div>
+    </div>
+
+    <!-- 标签云 -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="font-semibold text-gray-800">☁️ 标签云</h3>
+            <button onclick="refreshCloud()"
+                    class="text-sm text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                换一批
+            </button>
+        </div>
+        <div class="flex flex-wrap gap-2" id="tags-cloud">
+            <!-- 通过 JS 动态加载 -->
+        </div>
+    </div>
+
+    <!-- 标签列表 -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+            <h3 class="font-semibold text-gray-800">📋 标签列表</h3>
+            <div class="flex items-center gap-2">
+                <select id="sort-select"
+                        onchange="resetAndLoad()"
+                        class="text-sm border border-gray-300 rounded-lg px-3 py-1.5">
+                    <option value="count">按文章数排序</option>
+                    <option value="name">按名称排序</option>
+                    <option value="recent">按最近使用排序</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="tags-list" class="divide-y divide-gray-100">
+            <!-- 通过 JS 动态加载 -->
+        </div>
+
+        <!-- 加载更多 -->
+        <div id="load-more-container" class="p-4 text-center hidden">
+            <button onclick="loadMore()"
+                    id="load-more-btn"
+                    class="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">
+                加载更多
+            </button>
+        </div>
+
+        <!-- 加载中 -->
+        <div id="loading" class="p-8 text-center hidden">
+            <div class="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto"></div>
+            <p class="text-gray-400 text-sm mt-2">加载中...</p>
+        </div>
+
+        <!-- 无数据 -->
+        <div id="no-data" class="p-12 text-center hidden">
+            <div class="text-4xl mb-3">🏷️</div>
+            <p class="text-gray-500">暂无标签</p>
+            <p class="text-sm text-gray-400 mt-1">添加订阅并处理文章后，AI 会自动提取标签</p>
+        </div>
+    </div>
+</div>
+
+<!-- 编辑标签模态框 -->
+<div id="tag-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">✏️ 编辑标签</h3>
+        <form id="tag-form"
+              hx-put="/api/tags/0"
+              _="on htmx:afterRequest js closeTagModal()">
+            <input type="hidden" name="id" id="tag-id" value="">
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">标签名称</label>
+                    <input type="text"
+                           name="name"
+                           id="tag-name"
+                           required
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">标签颜色</label>
+                    <div class="flex gap-2 flex-wrap">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#1a6b3c" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#1a6b3c"></span>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#175a33" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#175a33"></span>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#b87848" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#b87848"></span>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#9d6339" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#9d6339"></span>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#8a5a3b" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#8a5a3b"></span>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#78716c" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#78716c"></span>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#57534e" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#57534e"></span>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="color" value="#292524" class="sr-only peer">
+                            <span class="inline-block w-8 h-8 rounded-full peer-checked:ring-2 peer-checked:ring-offset-2 peer-checked:ring-gray-500" style="background-color:#292524"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 mt-6">
+                <button type="button"
+                        onclick="closeTagModal()"
+                        class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
+                    取消
+                </button>
+                <button type="submit"
+                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                    保存
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// 状态管理
+let currentPage = 1;
+let isLoading = false;
+let hasMore = true;
+let allTags = [];  // 存储所有标签用于标签云
+let searchQuery = '';  // 搜索关键词
+let searchTimeout = null;  // 搜索防抖
+
+// 旧版 Tailwind 默认色板映射到报纸风素色板（存量标签数据兼容）
+const legacyColorMap = {
+    '#3b82f6': '#1a6b3c', '#10b981': '#175a33', '#f59e0b': '#b87848',
+    '#ef4444': '#9d6339', '#8b5cf6': '#8a5a3b', '#ec4899': '#78716c',
+    '#6366f1': '#57534e', '#14b8a6': '#292524',
+};
+function normalizeColor(c) {
+    return legacyColorMap[(c || '').toLowerCase()] || c || '#1a6b3c';
+}
+
+// 页面加载时初始化
+document.addEventListener('DOMContentLoaded', function() {
+    loadTagsCloud();
+    loadTagsList();
+
+    // 搜索功能（防抖 + API 搜索）
+    document.getElementById('tag-search').addEventListener('input', function(e) {
+        const query = e.target.value.trim();
+
+        // 清除之前的定时器
+        if (searchTimeout) {
+            clearTimeout(searchTimeout);
+        }
+
+        // 防抖：300ms 后执行搜索
+        searchTimeout = setTimeout(function() {
+            searchQuery = query;
+            resetAndLoad();
+        }, 300);
+    });
+
+    // 滚动加载更多
+    window.addEventListener('scroll', function() {
+        if (isLoading || !hasMore) return;
+
+        const scrollHeight = document.documentElement.scrollHeight;
+        const scrollTop = document.documentElement.scrollTop;
+        const clientHeight = document.documentElement.clientHeight;
+
+        if (scrollTop + clientHeight >= scrollHeight - 200) {
+            loadMore();
+        }
+    });
+});
+
+// 加载标签云（随机展示）
+function loadTagsCloud() {
+    fetch('/api/tags?page_size=100')
+        .then(res => res.json())
+        .then(data => {
+            allTags = data.tags || [];
+            displayRandomCloud();
+        })
+        .catch(err => {
+            console.error('加载标签云失败:', err);
+        });
+}
+
+// 随机展示标签云
+function displayRandomCloud() {
+    const cloud = document.getElementById('tags-cloud');
+
+    if (allTags.length === 0) {
+        cloud.innerHTML = '<p class="text-gray-400 text-sm">暂无标签，添加订阅并处理后 AI 会自动提取标签</p>';
+        return;
+    }
+
+    // 随机选择最多 20 个标签
+    const shuffled = [...allTags].sort(() => Math.random() - 0.5);
+    const displayTags = shuffled.slice(0, Math.min(20, shuffled.length));
+
+    cloud.innerHTML = displayTags.map(tag => {
+        const count = tag.usage_count || 0;
+        let fontSize = '0.875rem';
+        if (count > 50) fontSize = '1.25rem';
+        else if (count > 20) fontSize = '1.1rem';
+        else if (count > 10) fontSize = '1rem';
+
+        return `<a href="/articles?tag=${encodeURIComponent(tag.name)}"
+               class="px-3 py-1.5 rounded transition hover:opacity-80 bg-gray-100 text-gray-700 flex items-center gap-1.5"
+               style="font-size: ${fontSize};">
+            <span class="w-2 h-2 rounded-sm flex-shrink-0" style="background-color: ${normalizeColor(tag.color)};"></span>
+            <span>${escapeHtml(tag.name)}</span>
+            <span class="text-gray-400 font-mono text-xs">${count}</span>
+        </a>`;
+    }).join('');
+}
+
+// 刷新标签云
+function refreshCloud() {
+    displayRandomCloud();
+}
+
+// 加载标签列表
+function loadTagsList() {
+    if (isLoading) return;
+
+    isLoading = true;
+    const loading = document.getElementById('loading');
+    const noData = document.getElementById('no-data');
+    const loadMoreContainer = document.getElementById('load-more-container');
+
+    loading.classList.remove('hidden');
+    noData.classList.add('hidden');
+    loadMoreContainer.classList.add('hidden');
+
+    const sort = document.getElementById('sort-select').value;
+
+    // 构建搜索参数
+    let url = `/api/tags?page=${currentPage}&page_size=20&sort=${sort}`;
+    if (searchQuery) {
+        url += `&search=${encodeURIComponent(searchQuery)}`;
+    }
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            loading.classList.add('hidden');
+            isLoading = false;
+
+            const tags = data.tags || [];
+            const total = data.total || 0;
+            const totalPages = data.total_page || 1;
+
+            if (currentPage === 1 && tags.length === 0) {
+                noData.classList.remove('hidden');
+                return;
+            }
+
+            hasMore = currentPage < totalPages;
+
+            appendTags(tags);
+
+            if (hasMore) {
+                loadMoreContainer.classList.remove('hidden');
+            } else {
+                loadMoreContainer.classList.add('hidden');
+            }
+        })
+        .catch(err => {
+            loading.classList.add('hidden');
+            isLoading = false;
+            console.error('加载标签列表失败:', err);
+        });
+}
+
+// 添加标签到列表
+function appendTags(tags) {
+    const list = document.getElementById('tags-list');
+
+    tags.forEach(tag => {
+        const html = `
+        <div class="p-4 hover:bg-gray-50 transition flex items-center justify-between" id="tag-${tag.id}">
+            <div class="flex items-center gap-4">
+                <span class="w-4 h-4 rounded-full" style="background-color: ${normalizeColor(tag.color)};"></span>
+                <div>
+                    <h4 class="font-medium text-gray-900">${escapeHtml(tag.name)}</h4>
+                    <p class="text-sm text-gray-500">${tag.usage_count || 0} 篇文章</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="/articles?tag=${encodeURIComponent(tag.name)}"
+                   class="text-blue-500 hover:text-blue-700 text-sm px-3 py-1 hover:bg-blue-50 rounded-lg transition">
+                    查看文章 →
+                </a>
+                <button onclick="editTag(${tag.id})"
+                          class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                          title="编辑">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                </button>
+                <button onclick="deleteTag(${tag.id})"
+                          class="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                          title="删除">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>`;
+        list.insertAdjacentHTML('beforeend', html);
+    });
+}
+
+// 加载更多
+function loadMore() {
+    if (isLoading || !hasMore) return;
+    currentPage++;
+    loadTagsList();
+}
+
+// 重置并加载
+function resetAndLoad() {
+    currentPage = 1;
+    hasMore = true;
+    document.getElementById('tags-list').innerHTML = '';
+    loadTagsList();
+}
+
+// 删除标签
+function deleteTag(id) {
+    if (!confirm('确定要删除这个标签吗？')) return;
+
+    fetch(`/api/tags/${id}`, { method: 'DELETE' })
+        .then(res => {
+            if (res.ok) {
+                const el = document.getElementById(`tag-${id}`);
+                if (el) el.remove();
+                // 同时刷新标签云
+                loadTagsCloud();
+            }
+        })
+        .catch(err => {
+            console.error('删除失败:', err);
+            alert('删除失败');
+        });
+}
+
+function editTag(id) {
+    fetch(`/api/tags/${id}`)
+        .then(res => res.json())
+        .then(tag => {
+            document.getElementById('tag-id').value = tag.id;
+            document.getElementById('tag-name').value = tag.name;
+
+            // 选中颜色
+            const colorRadio = document.querySelector(`input[name="color"][value="${tag.color}"]`);
+            if (colorRadio) colorRadio.checked = true;
+
+            // 更新 form 的 action
+            document.getElementById('tag-form').setAttribute('hx-put', `/api/tags/${id}`);
+
+            document.getElementById('tag-modal').classList.remove('hidden');
+        });
+}
+
+function closeTagModal() {
+    document.getElementById('tag-modal').classList.add('hidden');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ESC 关闭
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeTagModal();
+});
+
+// 点击背景关闭
+document.getElementById('tag-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeTagModal();
+});
+</script>
+{{end}}
