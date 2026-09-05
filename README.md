@@ -57,6 +57,16 @@ docker run -d \
 
 首次启动自动生成 `/data/config.yaml`，编辑后重启容器生效。
 
+数据库与配置均存放在 `/data` 卷内，升级（拉新镜像后删除重建容器）不会丢数据：
+
+```bash
+docker pull ghcr.io/mingyanplus/rsshub:latest
+docker rm -f rss-ai
+docker run -d --name rss-ai -p 8080:8080 -v rss-ai-data:/data ghcr.io/mingyanplus/rsshub:latest
+```
+
+> v1.0.1 及更早版本存在已知问题：数据库实际写在容器内 `/app/data/rss.db`（未在卷内），容器删除重建后文章数据会丢失。v1.0.2 起启动时自动迁移到 `/data/rss.db`。若旧容器尚未删除，可先 `docker cp rss-ai:/app/data/rss.db ./rss.db.bak` 抢救数据，再复制进卷内恢复。
+
 ### 二进制
 
 从 [Releases](https://github.com/mingyanplus/rsshub/releases) 下载对应平台压缩包（含二进制 + 模板 + 示例配置），解压后：

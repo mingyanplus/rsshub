@@ -32,5 +32,6 @@ USER app
 ENV TZ=Asia/Shanghai
 EXPOSE 8080
 
-# 首次启动若 /data/config.yaml 不存在则复制示例配置
-CMD ["sh", "-c", "[ -f /data/config.yaml ] || cp /app/config.example.yaml /data/config.yaml; exec /app/rss-ai -config /data/config.yaml"]
+# 首次启动若 /data/config.yaml 不存在则复制示例配置；
+# 并将默认相对路径数据库改写为 /data 卷内（幂等），防止容器升级重建时丢数据
+CMD ["sh", "-c", "[ -f /data/config.yaml ] || cp /app/config.example.yaml /data/config.yaml; sed -i 's#path: \"./data/rss.db\"#path: \"/data/rss.db\"#' /data/config.yaml; exec /app/rss-ai -config /data/config.yaml"]
