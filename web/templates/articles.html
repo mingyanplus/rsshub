@@ -40,6 +40,14 @@
 .article-card.read:hover {
     opacity: 0.85;
 }
+/* 文章预览正文：加大行间距与段间距 */
+#preview-body {
+    line-height: 1.9;
+}
+#preview-body p {
+    margin-top: 1.5em;
+    margin-bottom: 1.5em;
+}
 </style>
 <div class="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-8rem)]">
     <!-- 左侧：筛选器 + 文章列表 -->
@@ -523,6 +531,16 @@ function clearTagFilter() {
 
 // 初始化
 initTagFilter();
+
+// 所有图片不发送 Referer，避免来源站防盗链拦截
+const previewBody = document.getElementById('preview-body');
+function applyNoReferrer() {
+    previewBody.querySelectorAll('img').forEach(img => {
+        img.referrerPolicy = 'no-referrer';
+    });
+}
+applyNoReferrer();
+new MutationObserver(applyNoReferrer).observe(previewBody, { childList: true, subtree: true });
 
 // 初始加载
 loadArticles(false);
