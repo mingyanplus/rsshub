@@ -225,6 +225,7 @@ type SettingsData struct {
 	ProxyURL             string
 	ProxyEnableContent   bool
 	ProxyEnableLLM       bool
+	ServerPassword       string
 }
 
 type CategoryData struct {
@@ -2720,6 +2721,9 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 		appConfig.Scheduler.EveningReportTime = r.FormValue("evening_report_time")
 		appConfig.Scheduler.DailyReportTime = r.FormValue("daily_report_time")
 
+		// 登录密码（留空则不启用登录校验；修改后旧会话立即失效）
+		appConfig.Server.Password = r.FormValue("server_password")
+
 		// 保存到配置文件
 		if err := saveConfigToFile(); err != nil {
 			w.Header().Set("Content-Type", "text/html")
@@ -2978,6 +2982,28 @@ func saveConfigToFile() error {
 	lines := strings.Split(string(originalContent), "\n")
 	var result strings.Builder
 
+	// 预检 server 段内是否已有 password 行（没有则在 server: 行后插入）
+	serverHasPassword := false
+	{
+		inServer := false
+		for _, l := range lines {
+			t := strings.TrimSpace(l)
+			if strings.HasPrefix(t, "server:") {
+				inServer = true
+				continue
+			}
+			if inServer {
+				if t != "" && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+					inServer = false // 下一个顶级键，server 段结束
+				} else if strings.HasPrefix(t, "password:") {
+					serverHasPassword = true
+					break
+				}
+			}
+		}
+	}
+	inServerSection := false
+
 	// 当前所在的配置区域
 	inLLMSection := false
 	inEmbeddingSection := false
@@ -2990,8 +3016,21 @@ func saveConfigToFile() error {
 	for _, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
 
+		// 顶级键开启新段时结束 server 段（避免误更新其他段的 password，如 email）
+		if inServerSection && trimmedLine != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmedLine, "#") {
+			inServerSection = false
+		}
+
 		// 检测区域
-		if strings.HasPrefix(trimmedLine, "llm:") {
+		if strings.HasPrefix(trimmedLine, "server:") {
+			inServerSection = true
+			// server 段缺 password 行时紧跟 server: 行插入（缩进与示例配置一致）
+			if !serverHasPassword {
+				result.WriteString(line + "\n")
+				result.WriteString(fmt.Sprintf("  password: %q\n", appConfig.Server.Password))
+				continue
+			}
+		} else if strings.HasPrefix(trimmedLine, "llm:") {
 			inLLMSection = true
 			inEmbeddingSection = false
 		} else if strings.HasPrefix(trimmedLine, "embedding:") {
@@ -3026,6 +3065,11 @@ func saveConfigToFile() error {
 			inGotifySection = false
 			inWebhookSection = false
 			inQQBotSection = false
+		}
+
+		// 更新 server 段登录密码
+		if inServerSection && strings.Contains(line, "password:") {
+			line = updateYAMLValue(line, appConfig.Server.Password)
 		}
 
 		// 更新 LLM 配置
@@ -3591,6 +3635,8 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings.ProxyURL = appConfig.Proxy.URL
 		settings.ProxyEnableContent = appConfig.Proxy.EnableContent
 		settings.ProxyEnableLLM = appConfig.Proxy.EnableLLM
+		// 登录密码
+		settings.ServerPassword = appConfig.Server.Password
 	}
 
 	data := PageData{
