@@ -23,6 +23,8 @@ WORKDIR /app
 COPY --from=builder /out/rss-ai ./rss-ai
 COPY web ./web
 COPY config.example.yaml ./config.example.yaml
+# 镜像内示例配置的数据库指向 /data 卷：首次生成的 config.yaml 即为正确路径（所见即所得）
+RUN sed -i 's#path: "./data/rss.db"#path: "/data/rss.db"#' ./config.example.yaml
 
 # 数据目录（SQLite 数据库与运行配置）
 RUN mkdir -p /data && chown -R app:app /data /app
@@ -32,6 +34,6 @@ USER app
 ENV TZ=Asia/Shanghai
 EXPOSE 8080
 
-# 首次启动若 /data/config.yaml 不存在则复制示例配置；
-# 并将默认相对路径数据库改写为 /data 卷内（幂等），防止容器升级重建时丢数据
+# 首次启动生成 /data/config.yaml（镜像内示例已指向 /data）；
+# 运行期 sed 仅用于把 v1.0.1 及更早旧卷中的相对路径迁移到 /data 卷内（幂等）
 CMD ["sh", "-c", "[ -f /data/config.yaml ] || cp /app/config.example.yaml /data/config.yaml; sed -i 's#path: \"./data/rss.db\"#path: \"/data/rss.db\"#' /data/config.yaml; exec /app/rss-ai -config /data/config.yaml"]
