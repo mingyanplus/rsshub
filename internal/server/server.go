@@ -331,6 +331,12 @@ func NewRouter() *Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(AuthMiddleware) // 登录校验（server.password 留空则不生效）
+
+	// 登录/登出
+	r.Get("/login", LoginPage)
+	r.Post("/login", LoginSubmit)
+	r.Get("/logout", Logout)
 
 	// 健康检查
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {

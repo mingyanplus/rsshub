@@ -48,6 +48,84 @@
     margin-top: 1.5em;
     margin-bottom: 1.5em;
 }
+/* 正文内嵌 HTML 的常规排版（覆盖来源站残缺样式，色板与全局报纸风一致） */
+#preview-body img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin: 0.5em 0;
+}
+#preview-body table {
+    display: block;
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.25em 0;
+    font-size: 0.9em;
+    overflow-x: auto; /* 宽表横向滚动，避免撑破布局 */
+}
+#preview-body th, #preview-body td {
+    border: 1px solid #d6d3cd;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+}
+#preview-body th {
+    background: #f4f3f1;
+    font-weight: 600;
+}
+#preview-body pre {
+    background: #f4f3f1;
+    border: 1px solid #e8e6e2;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 1.25em 0;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.6;
+}
+#preview-body code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+#preview-body p > code, #preview-body li > code {
+    background: #f4f3f1;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.9em;
+}
+#preview-body blockquote {
+    border-left: 3px solid #b7d5c4;
+    background: #f0f7f2;
+    border-radius: 0 4px 4px 0;
+    padding: 8px 14px;
+    margin: 1.25em 0;
+    color: #78716c;
+}
+#preview-body ul, #preview-body ol {
+    padding-left: 1.6em;
+    margin: 1.25em 0;
+}
+#preview-body ul { list-style: disc; }
+#preview-body ol { list-style: decimal; }
+#preview-body li { margin: 0.4em 0; }
+#preview-body h1, #preview-body h2, #preview-body h3, #preview-body h4 {
+    font-weight: 700;
+    color: #1c1b19;
+    margin: 1.5em 0 0.6em;
+    line-height: 1.4;
+}
+#preview-body h1 { font-size: 1.25em; }
+#preview-body h2 { font-size: 1.15em; }
+#preview-body h3 { font-size: 1.05em; }
+#preview-body a {
+    color: #1a6b3c;
+    text-decoration: underline;
+}
+#preview-body hr {
+    border: none;
+    border-top: 1px solid #e8e6e2;
+    margin: 1.5em 0;
+}
+#preview-body strong { font-weight: 700; }
 </style>
 <div class="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-8rem)]">
     <!-- 左侧：筛选器 + 文章列表 -->

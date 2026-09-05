@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -135,10 +136,18 @@ ai:
 	}
 }
 
-func TestLoadConfigFileNotFound(t *testing.T) {
-	_, err := Load("/nonexistent/config.yaml")
-	if err == nil {
-		t.Error("Load() should return error for nonexistent file")
+func TestLoadConfigAutoCreate(t *testing.T) {
+	// 不存在的配置文件应自动创建并按默认值加载
+	path := filepath.Join(t.TempDir(), "sub", "config.yaml")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() should auto-create nonexistent config, got error: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("config file should be auto-created: %v", err)
+	}
+	if cfg.Server.Host != "127.0.0.1" || cfg.Server.Port != 8080 {
+		t.Errorf("auto-created config should load defaults, got host=%v port=%v", cfg.Server.Host, cfg.Server.Port)
 	}
 }
 

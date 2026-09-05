@@ -1,13 +1,19 @@
 package config
 
 import (
+	"embed"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
+
+//go:embed embedded/config.example.yaml
+var embeddedFS embed.FS
 
 // ConfigWatcher 配置监听器
 type ConfigWatcher struct {
@@ -57,6 +63,7 @@ type ServerConfig struct {
 	Port            int    `mapstructure:"port"`
 	RefreshInterval int    `mapstructure:"refresh_interval"` // RSS 刷新间隔（分钟），默认30
 	Timezone        string `mapstructure:"timezone"`         // 显示时区，如 "Asia/Shanghai" 或 "Local"
+	Password        string `mapstructure:"password"`         // Web 登录密码，留空则不启用登录
 	LogLevel        string `mapstructure:"log_level"`        // 日志级别: DEBUG, INFO, WARN, ERROR
 	LogMaxLineLen   int    `mapstructure:"log_max_line_len"` // 单行最大长度（0不限制）
 }
@@ -219,12 +226,38 @@ var defaults = &Config{
     },
 }
 
+// ensureConfigExists 配置文件不存在时自动创建默认配置（首次初始化）
+func ensureConfigExists(path string) {
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	data, err := embeddedFS.ReadFile("embedded/config.example.yaml")
+	if err != nil {
+		log.Printf("读取内置示例配置失败: %v", err)
+		return
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Printf("创建配置目录失败: %v", err)
+			return
+		}
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		log.Printf("自动创建默认配置失败: %v", err)
+		return
+	}
+	log.Printf("未发现配置文件，已自动创建默认配置: %s（请编辑后重启生效）", path)
+}
+
 // Load 从文件加载配置
 func Load(path string) (*Config, error) {
 	v := viper.New()
 
 	// 设置默认值
 	setDefaults(v, defaults)
+
+	// 首次启动时自动创建默认配置文件
+	ensureConfigExists(path)
 
 	// 配置文件设置
 	v.SetConfigFile(path)
