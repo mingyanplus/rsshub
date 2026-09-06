@@ -389,7 +389,22 @@ func articleKeywords(a *models.Article) []string {
 
 // mergeClusterLabel 标签合并：新文章关键词优先，旧标签词补位，取前 limit 个
 func mergeClusterLabel(oldLabel string, keywords []string, limit int) string {
-	return joinKeywords(mergeKeywords(keywords, parseKeywords(oldLabel)), limit)
+	return joinKeywords(mergeKeywords(keywords, parseClusterLabel(oldLabel)), limit)
+}
+
+// parseClusterLabel 解析簇标签（写入用顿号连接，兼容逗号），与 parseKeywords 的逗号口径分开
+func parseClusterLabel(label string) []string {
+	if label == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(label, func(r rune) bool { return r == '、' || r == ',' || r == '，' })
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // joinKeywords 取前 limit 个关键词用顿号连接

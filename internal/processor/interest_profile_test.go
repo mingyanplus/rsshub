@@ -164,3 +164,19 @@ func TestInterestProfileSeedFromSubscriptions(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeClusterLabelNoDuplication(t *testing.T) {
+	// 旧标签（顿号分隔）与新关键词应正确去重合并，而非重复堆叠
+	got := mergeClusterLabel("Go、并发", []string{"Go", "goroutine"}, 3)
+	if got != "Go、goroutine、并发" {
+		t.Errorf("mergeClusterLabel = %q, want %q", got, "Go、goroutine、并发")
+	}
+	// 逗号格式兼容
+	if got := mergeClusterLabel("Go,并发", []string{"Go"}, 3); got != "Go、并发" {
+		t.Errorf("mergeClusterLabel(逗号) = %q", got)
+	}
+	// 空旧标签
+	if got := mergeClusterLabel("", []string{"a", "b"}, 3); got != "a、b" {
+		t.Errorf("mergeClusterLabel(空) = %q", got)
+	}
+}
