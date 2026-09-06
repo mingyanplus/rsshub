@@ -411,6 +411,9 @@ func NewRouter() *Router {
 		// 行为采集（推荐系统 P1：曝光异步批量上报）
 		r.Post("/behavior/exposures", ReportExposures)
 
+		// 推荐列表（P3：多因子打分 + 推荐理由）
+		r.Get("/recommendations", GetRecommendations)
+
 		// 文章列表
 		r.Get("/articles", ListArticles)
 		r.Get("/articles/html", ListArticlesHTML)
@@ -2249,6 +2252,92 @@ func ReportExposures(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "count": len(records)})
+}
+
+// GetRecommendations 推荐列表：多因子打分排序 + 分项分数与推荐理由
+func GetRecommendations(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil || appInterestProfile == nil {
+		http.Error(w, "Recommender not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+
+	recommender := processor.NewRecommender(appDB, appInterestProfile)
+	scored, err := recommender.Recommend(limit)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to recommend: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	feeds, _ := appDB.ListFeeds()
+	feedMap := make(map[int64]string)
+	for _, f := range feeds {
+		feedMap[f.ID] = f.Title
+	}
+
+	type RecResponse struct {
+		ID          int64   `json:"id"`
+		FeedID      int64   `json:"feed_id"`
+		FeedTitle   string  `json:"feed_title"`
+		Title       string  `json:"title"`
+		Link        string  `json:"link"`
+		Summary     string  `json:"summary"`
+		AISummary   string  `json:"ai_summary"`
+		Keywords    string  `json:"keywords"`
+		IsAd        bool    `json:"is_ad"`
+		IsRead      bool    `json:"is_read"`
+		IsFavorite  bool    `json:"is_favorite"`
+		PublishedAt string  `json:"published_at"`
+		Score       float64 `json:"score"`
+		Interest    float64 `json:"interest"`
+		Source      float64 `json:"source"`
+		Freshness   float64 `json:"freshness"`
+		State       float64 `json:"state"`
+		Penalty     float64 `json:"penalty"`
+		Reason      string  `json:"reason"`
+		Channel     string  `json:"channel"`
+	}
+
+	response := make([]RecResponse, 0, len(scored))
+	for _, s := range scored {
+		a := s.Article
+		publishedAt := formatTimePtrInTimezone(a.PublishedAt)
+		if publishedAt == "" {
+			publishedAt = formatTimeInTimezone(a.FetchedAt)
+		}
+		response = append(response, RecResponse{
+			ID:          a.ID,
+			FeedID:      a.FeedID,
+			FeedTitle:   feedMap[a.FeedID],
+			Title:       a.Title,
+			Link:        a.Link,
+			Summary:     a.Summary,
+			AISummary:   a.AISummary,
+			Keywords:    a.Keywords,
+			IsAd:        a.IsAd,
+			IsRead:      a.IsRead,
+			IsFavorite:  a.IsFavorite,
+			PublishedAt: publishedAt,
+			Score:       s.Score,
+			Interest:    s.Interest,
+			Source:      s.Source,
+			Freshness:   s.Freshness,
+			State:       s.State,
+			Penalty:     s.Penalty,
+			Reason:      s.Reason,
+			Channel:     s.Channel,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // FetchOriginalContent 从文章原始链接获取完整内容

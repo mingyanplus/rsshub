@@ -198,7 +198,17 @@ func (p *InterestProfile) AdjacentClusters(vec []float32, n int) ([][]float32, [
 
 // PositiveCentroids 返回全部正簇（质心+标签+权重），排序/召回用
 func (p *InterestProfile) PositiveCentroids() ([]models.InterestCluster, [][]float32) {
-	clusters, err := p.db.ListInterestClusters(PolarityPositive)
+	return p.centroidsOf(PolarityPositive)
+}
+
+// NegativeCentroids 返回全部负簇（质心+标签+权重），排序惩罚用
+func (p *InterestProfile) NegativeCentroids() ([]models.InterestCluster, [][]float32) {
+	return p.centroidsOf(PolarityNegative)
+}
+
+// centroidsOf 加载指定极性全部簇并反序列化质心
+func (p *InterestProfile) centroidsOf(polarity string) ([]models.InterestCluster, [][]float32) {
+	clusters, err := p.db.ListInterestClusters(polarity)
 	if err != nil || len(clusters) == 0 {
 		return nil, nil
 	}

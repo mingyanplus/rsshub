@@ -162,6 +162,11 @@
                 <option value="read">已读</option>
             </select>
 
+            <select id="sort-mode" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm" title="智能推荐按你的兴趣画像排序，并展示推荐理由">
+                <option value="latest">🕒 最新</option>
+                <option value="recommend">✨ 智能推荐</option>
+            </select>
+
             <!-- 标签筛选显示 -->
             <div id="tag-filter-display" class="hidden flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm">
                 <span id="tag-filter-name"></span>
@@ -260,6 +265,7 @@ let currentOffset = 0;
 let isLoading = false;
 let hasMore = true;
 let selectedArticleId = null;
+let recommendMode = false; // 智能推荐模式：走推荐 API，一次取全量不分页
 const pageSize = 20;
 
 // 标记文章为已读
@@ -343,8 +349,8 @@ window.addEventListener('pagehide', () => {
 let exposureQueue = [];
 let exposureTimer = null;
 
-function queueExposure(articleId, position) {
-    exposureQueue.push({ article_id: articleId, position: position, channel: 'freshness' });
+function queueExposure(articleId, position, channel) {
+    exposureQueue.push({ article_id: articleId, position: position, channel: channel || 'freshness' });
     if (exposureQueue.length >= 100) flushExposures(false);
     else if (!exposureTimer) exposureTimer = setTimeout(() => flushExposures(false), 10000);
 }
@@ -458,8 +464,17 @@ async function loadArticles(append = false) {
     const queryString = buildQueryString(params);
 
     try {
-        const response = await fetch(`/api/articles?${queryString}`);
-        const articles = await response.json();
+        let articles;
+        if (recommendMode) {
+            // 推荐流：按兴趣画像多因子打分排序，一次取全量
+            const response = await fetch(`/api/recommendations?limit=60`);
+            articles = await response.json();
+            hasMore = false;
+            trigger.classList.add('hidden');
+        } else {
+            const response = await fetch(`/api/articles?${queryString}`);
+            articles = await response.json();
+        }
 
         if (!append) {
             document.getElementById('articles-grid').innerHTML = '';
@@ -490,7 +505,7 @@ async function loadArticles(append = false) {
         articles.forEach((article, idx) => {
             const card = createArticleCard(article);
             grid.insertAdjacentHTML('beforeend', card);
-            queueExposure(article.id, currentOffset + idx);
+            queueExposure(article.id, currentOffset + idx, article.channel || 'freshness');
         });
 
         currentOffset += articles.length;
@@ -515,6 +530,9 @@ function createArticleCard(article) {
     const summaryText = summary.length > 100 ? summary.substring(0, 100) + '...' : summary;
     const time = article.published_at || '';
     const readClass = article.is_read ? 'read' : '';
+    const reasonBadge = article.reason
+        ? `<div class="mt-1"><span class="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5 inline-block">✨ ${escapeHtml(article.reason)}</span></div>`
+        : '';
 
     return `
     <article class="article-card ${readClass} group relative bg-white rounded-lg shadow-sm transition-all duration-200 cursor-pointer border border-transparent mb-3"
@@ -523,6 +541,7 @@ function createArticleCard(article) {
         <div class="card-content p-3">
             <h2 class="text-sm font-semibold text-gray-900 mb-1.5 line-clamp-2">${adBadge}${failBadge} ${escapeHtml(article.title)}</h2>
             <p class="text-gray-500 text-xs line-clamp-3 mb-2">${escapeHtml(summary)}</p>
+            ${reasonBadge}
             <div class="flex items-center gap-2 text-xs text-gray-400">
                 <span>📰 ${article.feed_title}</span>
                 <span>📅 ${time}</span>
@@ -710,6 +729,14 @@ async function fetchOriginalContent() {
         hasMore = true;
         loadArticles(false);
     });
+});
+
+// 排序模式切换（最新 / 智能推荐）
+document.getElementById('sort-mode').addEventListener('change', (e) => {
+    recommendMode = e.target.value === 'recommend';
+    currentOffset = 0;
+    hasMore = true;
+    loadArticles(false);
 });
 
 // 搜索框防抖
