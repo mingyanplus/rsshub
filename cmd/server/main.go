@@ -72,6 +72,15 @@ func main() {
 		logger.Warn("failed to init default topic prompts: %v", err)
 	}
 
+	// 初始化兴趣画像（推荐系统）：订阅先验冷启动 + 反馈闭环
+	interestProfile := processor.NewInterestProfile(db)
+	server.SetInterestProfile(interestProfile)
+	go func() {
+		if err := interestProfile.SeedFromSubscriptions(); err != nil {
+			logger.Warn("兴趣画像冷启动失败: %v", err)
+		}
+	}()
+
 	// 初始化模板
 	templateDir := "web/templates"
 	if _, err := os.Stat(templateDir); os.IsNotExist(err) {
@@ -175,7 +184,7 @@ func main() {
 	}
 
 	// 启动定时任务调度器
-	stopScheduler := startScheduler(db, cfg, reportGen, analyzer)
+	stopScheduler := startScheduler(db, cfg, reportGen, analyzer, interestProfile)
 	defer stopScheduler()
 
 	// 创建 HTTP 服务
@@ -238,7 +247,7 @@ func initLogger(cfg *config.Config, cmdLogLevel string) {
 }
 
 // startScheduler 启动定时任务调度器
-func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.ReportGenerator, analyzer *ai.Analyzer) (stopFunc func()) {
+func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.ReportGenerator, analyzer *ai.Analyzer, interestProfile *processor.InterestProfile) (stopFunc func()) {
 	stopChan := make(chan struct{})
 
 	go func() {
@@ -257,6 +266,9 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 		// 生命周期检查间隔（默认每天一次）
 		lifecycleCheckInterval := 24 * time.Hour
 
+		// 兴趣簇每日衰减（与生命周期检查同频）
+		interestDecayInterval := 24 * time.Hour
+
 		// 初始延迟（启动后30秒开始第一次任务）
 		initialDelay := 30 * time.Second
 
@@ -273,6 +285,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 		reportCheckTicker := time.NewTicker(1 * time.Minute) // 每分钟检查一次早晚报
 		hotTopicTicker := time.NewTicker(hotTopicInterval)   // 热点检测
 		lifecycleTicker := time.NewTicker(lifecycleCheckInterval) // 生命周期检查
+		interestDecayTicker := time.NewTicker(interestDecayInterval) // 兴趣簇衰减
 
 		// 记录上次生成报告的日期，防止重复生成
 		var lastMorningReportDate, lastEveningReportDate, lastDailyReportDate string
@@ -300,6 +313,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 				reportCheckTicker.Stop()
 				hotTopicTicker.Stop()
 				lifecycleTicker.Stop()
+				interestDecayTicker.Stop()
 				logger.Info("Scheduler stopped")
 				return
 
@@ -374,6 +388,15 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 				// 生命周期管理：自动暂停长时间无更新的事件
 				logger.Debug("Running event lifecycle check...")
 				go autoPauseInactiveEvents(db, 7) // 7天无更新自动暂停
+
+			case <-interestDecayTicker.C:
+				// 兴趣簇每日衰减与淘汰（推荐方案 §3.2）
+				logger.Debug("Running interest profile decay...")
+				go func() {
+					if err := interestProfile.ApplyDailyDecay(); err != nil {
+						logger.Error("兴趣簇衰减失败: %v", err)
+					}
+				}()
 			}
 		}
 	}()

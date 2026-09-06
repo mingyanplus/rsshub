@@ -48,6 +48,26 @@ var appNotifyMgr *notify.Manager
 var appEventMatcher *processor.EventMatcher
 var appHotTopicDetector *processor.HotTopicDetector
 var appTopicAggregator *processor.TopicAggregator
+var appInterestProfile *processor.InterestProfile
+
+// SetInterestProfile 设置兴趣画像服务（推荐系统反馈闭环）
+func SetInterestProfile(profile *processor.InterestProfile) {
+	appInterestProfile = profile
+}
+
+// recordFeedback 异步把行为并入兴趣画像（不影响请求路径）
+func recordFeedback(articleID int64, polarity string, mult float64) {
+	if appInterestProfile == nil || appDB == nil {
+		return
+	}
+	go func() {
+		article, err := appDB.GetArticleProfileData(articleID)
+		if err != nil {
+			return
+		}
+		appInterestProfile.RecordFeedback(article, polarity, mult)
+	}()
+}
 
 // SetConfig 设置应用配置
 func SetConfig(cfg *config.Config) {
@@ -2123,6 +2143,13 @@ func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
 	}
 	// 打开过预览即视为对曝光的点击（失败不影响主流程）
 	appDB.MarkExposureClicked(id)
+	// 反馈闭环：读完入正簇、秒退入负簇（方案 §7.1）
+	switch action {
+	case "read_complete":
+		recordFeedback(id, "positive", 1)
+	case "quick_bounce":
+		recordFeedback(id, "negative", 1)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "action": action})
 }
@@ -2155,6 +2182,10 @@ func ToggleArticleFavorite(w http.ResponseWriter, r *http.Request) {
 	if err := appDB.InsertReadLog(id, action, 0, 0); err != nil {
 		log.Printf("写入收藏日志失败: %v", err)
 	}
+	// 收藏为强正反馈（方案 §7.1：收藏 weight ×2）；取消收藏仅记录日志，不动画像
+	if favorite {
+		recordFeedback(id, "positive", 2)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "is_favorite": favorite})
 }
@@ -2177,6 +2208,8 @@ func MarkArticleNotInterested(w http.ResponseWriter, r *http.Request) {
 	if err := appDB.InsertReadLog(id, "not_interested", 0, 0); err != nil {
 		log.Printf("写不感兴趣日志失败: %v", err)
 	}
+	// 不感兴趣为强负反馈
+	recordFeedback(id, "negative", 2)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

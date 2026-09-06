@@ -101,6 +101,18 @@ type ArticleTag struct {
 	TagID     int64 `json:"tag_id" db:"tag_id"`
 }
 
+// InterestCluster 兴趣簇（推荐画像：正/负兴趣的在线增量聚类）
+type InterestCluster struct {
+	ID           int64     `json:"id" db:"id"`
+	Polarity     string    `json:"polarity" db:"polarity"` // positive / negative
+	Centroid     []byte    `json:"centroid" db:"centroid"` // 归一化质心向量
+	Weight       float64   `json:"weight" db:"weight"`     // 0.8~100
+	SampleCount  int       `json:"sample_count" db:"sample_count"`
+	LastActiveAt int64     `json:"last_active_at" db:"last_active_at"` // unix 秒
+	Label        string    `json:"label" db:"label"`                   // 自动标签（簇内高频关键词）
+	CreatedAt    int64     `json:"created_at" db:"created_at"`         // unix 秒
+}
+
 // FollowRule 关注规则
 type FollowRule struct {
 	ID                  int64     `json:"id" db:"id"`
