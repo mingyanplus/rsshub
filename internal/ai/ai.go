@@ -8,7 +8,9 @@ import (
 	"log"
 	"math"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"rss-ai/internal/config"
 )
@@ -37,6 +39,36 @@ type Analyzer struct {
 	embRateLimit    time.Duration // Embedding API 调用间隔
 	lastLLMCall     time.Time     // 上次 LLM 调用时间
 	lastEmbCall     time.Time     // 上次 Embedding 调用时间
+
+	promptMu             sync.RWMutex
+	analyzeSysOverride   string // 文章分析 system 提示词覆盖（空=内置默认）
+	translateSysOverride string // 翻译 system 提示词覆盖（空=内置默认）
+}
+
+// SetPromptOverrides 设置提示词覆盖（空字符串表示使用内置默认，支持热重载）
+func (a *Analyzer) SetPromptOverrides(analyze, translate string) {
+	a.promptMu.Lock()
+	a.analyzeSysOverride = strings.TrimSpace(analyze)
+	a.translateSysOverride = strings.TrimSpace(translate)
+	a.promptMu.Unlock()
+}
+
+func (a *Analyzer) analyzeSystemPrompt() string {
+	a.promptMu.RLock()
+	defer a.promptMu.RUnlock()
+	if a.analyzeSysOverride != "" {
+		return a.analyzeSysOverride
+	}
+	return DefaultAnalyzeSystemPrompt
+}
+
+func (a *Analyzer) translateSystemPrompt() string {
+	a.promptMu.RLock()
+	defer a.promptMu.RUnlock()
+	if a.translateSysOverride != "" {
+		return a.translateSysOverride
+	}
+	return DefaultTranslateSystemPrompt
 }
 
 // NewAnalyzer 创建分析器
@@ -120,17 +152,15 @@ func (a *Analyzer) waitForRateLimit(isLLM bool) {
 
 // AnalyzeArticle 分析文章（两阶段：内容分析 + 条件翻译）
 func (a *Analyzer) AnalyzeArticle(ctx context.Context, title, content string) (*AnalyzeResult, error) {
-	if len(content) > 4000 {
-		content = content[:4000]
-	}
+	content = TruncateRunes(content, 4000)
 
 	// Phase 1: 内容分析（带缓存）
 	a.waitForRateLimit(true)
-	// analyze_v2: 提示词加入正文清洗规则（剔除频道推广等无关内容），版本号升级使旧缓存失效
-	analyzeKey := buildCacheKey("analyze_v2", a.llmClient.Model(), title+content)
+	// analyze_v3: system/user 分离（利于服务商前缀缓存），key 纳入 system 防止提示词变更后命中旧缓存
+	sys := a.analyzeSystemPrompt()
+	analyzeKey := buildCacheKey("analyze_v3", a.llmClient.Model(), sys+title+content)
 	result, err := a.cache.CachedCall(ctx, analyzeKey, func() (string, error) {
-		prompt := BuildAnalyzePrompt(title, content)
-		return a.llmClient.ChatJSON(ctx, prompt)
+		return a.llmClient.ChatJSONWithSystem(ctx, sys, BuildAnalyzeUserPrompt(title, content))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("LLM analyze failed: %w", err)
@@ -144,10 +174,10 @@ func (a *Analyzer) AnalyzeArticle(ctx context.Context, title, content string) (*
 	// Phase 2: 翻译（仅非中文内容触发）
 	if !isChineseLang(content) && analyzeResult.TranslatedContent == "" {
 		a.waitForRateLimit(true)
-		translateKey := buildCacheKey("translate", a.llmClient.Model(), content)
+		sysT := a.translateSystemPrompt()
+		translateKey := buildCacheKey("translate_v2", a.llmClient.Model(), sysT+content)
 		translated, err := a.cache.CachedCall(ctx, translateKey, func() (string, error) {
-			prompt := BuildTranslatePrompt(content)
-			return a.llmClient.Chat(ctx, prompt)
+			return a.llmClient.ChatWithSystem(ctx, sysT, BuildTranslateUserPrompt(content))
 		})
 		if err != nil {
 			log.Printf("翻译失败 (非致命): %v", err)
@@ -161,9 +191,7 @@ func (a *Analyzer) AnalyzeArticle(ctx context.Context, title, content string) (*
 
 // GetEmbedding 获取文章向量（带缓存）
 func (a *Analyzer) GetEmbedding(ctx context.Context, text string) ([]byte, error) {
-	if len(text) > 8000 {
-		text = text[:8000]
-	}
+	text = TruncateRunes(text, 8000)
 
 	a.waitForRateLimit(false)
 
@@ -186,9 +214,8 @@ func (a *Analyzer) GetEmbedding(ctx context.Context, text string) ([]byte, error
 	return []byte(result), nil
 }
 
-// BuildTranslatePrompt 构建翻译提示词
-func BuildTranslatePrompt(content string) string {
-	return fmt.Sprintf(`你是一名专业的翻译专家。请将以下文章内容翻译为中文。
+// DefaultTranslateSystemPrompt 翻译的默认 system 提示词（可经 prompts.translate_system 覆盖）
+const DefaultTranslateSystemPrompt = `你是一名专业的翻译专家。请将用户提供的文章内容翻译为中文。
 
 要求：
 1. 若内容已经是中文，直接原样输出
@@ -197,18 +224,18 @@ func BuildTranslatePrompt(content string) string {
 4. 专有名词和技术术语保持原文，除非有广泛使用的中文译法
 5. 不添加任何额外标签、说明或评论
 6. 保留原文完整语义，使用自然流畅的中文表达
-7. 全文一次性输出，不设长度上限
+7. 全文一次性输出，不设长度上限`
 
-文章内容：
-%s`, content)
+// BuildTranslateUserPrompt 构建翻译的用户消息（仅含待翻译内容）
+func BuildTranslateUserPrompt(content string) string {
+	return content
 }
 
-// BuildAnalyzePrompt 构建 AI 分析提示词
-func BuildAnalyzePrompt(title, content string) string {
-	return fmt.Sprintf(`分析以下文章，返回 JSON 格式结果：
 
-文章标题：%s
-文章内容：%s
+// DefaultAnalyzeSystemPrompt 文章分析的默认 system 提示词
+// 指令部分固定不变，与文章内容（user 消息）分离，利于 LLM 服务商的前缀 context caching；
+// 可通过 config.yaml 的 prompts.analyze_system 覆盖（设置页可编辑）。
+const DefaultAnalyzeSystemPrompt = `你是一名专业的新闻/技术文章分析助手。请分析用户提供的文章，严格按以下要求返回 JSON 结果：
 
 请返回：
 {
@@ -277,7 +304,11 @@ func BuildAnalyzePrompt(title, content string) string {
 【广告判断补充规则】
 只有当你"非常确信"文章是广告/推广时才设为 true。
 如果只是疑似或没有把握，请设为 false。
-宁可漏过也不要误判正常文章。`, title, content)
+宁可漏过也不要误判正常文章。`
+
+// BuildAnalyzeUserPrompt 构建文章分析的用户消息（仅含文章数据，与 system 指令分离）
+func BuildAnalyzeUserPrompt(title, content string) string {
+	return fmt.Sprintf("文章标题：%s\n\n文章内容：\n%s", title, content)
 }
 
 // ParseAnalyzeResponse 解析 AI 分析响应
@@ -460,4 +491,16 @@ func BuildBriefPrompt(topicName string, articles []ArticleInfo, index int) strin
 **%d %s** — {{100字描述}} [[1]](链接1 "标题1")`, index, topicName))
 
 	return sb.String()
+}
+
+// TruncateRunes 按字节预算截断字符串，在 UTF-8 字符边界处切断，避免中文出现乱码
+func TruncateRunes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
 }

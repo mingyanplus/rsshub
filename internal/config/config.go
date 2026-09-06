@@ -48,6 +48,13 @@ type Config struct {
 	Push         PushConfig         `mapstructure:"push"`
 	EventMatcher EventMatcherConfig `mapstructure:"event_matcher"`
 	Proxy        ProxyConfig        `mapstructure:"proxy"`
+	Prompts      PromptsConfig      `mapstructure:"prompts"`
+}
+
+// PromptsConfig 提示词覆盖（留空使用程序内置默认，设置页可编辑）
+type PromptsConfig struct {
+	AnalyzeSystem   string `mapstructure:"analyze_system"`   // 文章分析 system 提示词
+	TranslateSystem string `mapstructure:"translate_system"` // 翻译 system 提示词
 }
 
 // ProxyConfig 代理配置：获取内容（RSS 抓取/原文获取）与 LLM 接口可分别启用
@@ -82,13 +89,22 @@ type AIConfig struct {
 
 // LLMConfig LLM 配置
 type LLMConfig struct {
-	Provider   string        `mapstructure:"provider"`
-	BaseURL    string        `mapstructure:"base_url"`
-	APIKey     string        `mapstructure:"api_key"`
-	Model      string        `mapstructure:"model"`
-	Timeout    time.Duration `mapstructure:"timeout"`
-	MaxRetries int           `mapstructure:"max_retries"`
-	UserAgent  string        `mapstructure:"user_agent"` // 自定义 User-Agent
+	Provider      string             `mapstructure:"provider"`
+	BaseURL       string             `mapstructure:"base_url"`
+	APIKey        string             `mapstructure:"api_key"`
+	Model         string             `mapstructure:"model"`
+	Fallback      LLMFallbackConfig  `mapstructure:"fallback"` // 备用 LLM：主模型失败时自动切换，留空项沿用主配置
+	Timeout       time.Duration      `mapstructure:"timeout"`
+	MaxRetries    int                `mapstructure:"max_retries"`
+	RetryInterval time.Duration      `mapstructure:"retry_interval"` // 重试基础间隔（指数退避：×1、×2、×4...封顶60s）
+	UserAgent     string             `mapstructure:"user_agent"` // 自定义 User-Agent
+}
+
+// LLMFallbackConfig 备用 LLM 配置（独立端点，留空项沿用主配置）
+type LLMFallbackConfig struct {
+	BaseURL string `mapstructure:"base_url"`
+	APIKey  string `mapstructure:"api_key"`
+	Model   string `mapstructure:"model"`
 }
 
 // EmbeddingConfig Embedding 配置
@@ -189,8 +205,9 @@ var defaults = &Config{
 	},
 	AI: AIConfig{
 		LLM: LLMConfig{
-			Provider: "openai",
-			Timeout:  60 * time.Second,
+			Provider:      "openai",
+			Timeout:       60 * time.Second,
+			RetryInterval: 3 * time.Second,
 		},
 		Embedding: EmbeddingConfig{
 			Provider: "openai",

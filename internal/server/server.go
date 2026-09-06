@@ -56,6 +56,7 @@ func SetConfig(cfg *config.Config) {
 	// 热重载 AI 客户端配置
 	if appAnalyzer != nil {
 		appAnalyzer.UpdateConfig(&cfg.AI.LLM, &cfg.AI.Embedding, &cfg.AI.RateLimit)
+		appAnalyzer.SetPromptOverrides(cfg.Prompts.AnalyzeSystem, cfg.Prompts.TranslateSystem)
 		log.Printf("AI 客户端配置已热重载")
 	}
 
@@ -199,6 +200,9 @@ type SettingsData struct {
 	LLMBaseURL           string
 	LLMAPIKey            string
 	LLMModel             string
+	LLMFallbackBaseURL   string
+	LLMFallbackAPIKey    string
+	LLMFallbackModel     string
 	EmbeddingBaseURL     string
 	EmbeddingAPIKey      string
 	EmbeddingModel       string
@@ -226,6 +230,8 @@ type SettingsData struct {
 	ProxyEnableContent   bool
 	ProxyEnableLLM       bool
 	ServerPassword       string
+	PromptAnalyzeSystem  string
+	PromptTranslateSystem string
 }
 
 type CategoryData struct {
@@ -442,6 +448,7 @@ func NewRouter() *Router {
 		// 设置
 		r.Post("/settings", SaveSettings)
 		r.Post("/settings/test", TestSettingsConnection)
+		r.Post("/settings/models", FetchModels)
 
 		// 配置重载
 		r.Post("/config/reload", ReloadConfig)
@@ -2691,6 +2698,9 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 		appConfig.AI.LLM.BaseURL = r.FormValue("llm_base_url")
 		appConfig.AI.LLM.Model = r.FormValue("llm_model")
 		appConfig.AI.LLM.APIKey = r.FormValue("llm_api_key")
+		appConfig.AI.LLM.Fallback.BaseURL = r.FormValue("llm_fallback_base_url")
+		appConfig.AI.LLM.Fallback.APIKey = r.FormValue("llm_fallback_api_key")
+		appConfig.AI.LLM.Fallback.Model = r.FormValue("llm_fallback_model")
 		appConfig.AI.Embedding.BaseURL = r.FormValue("embedding_base_url")
 		appConfig.AI.Embedding.Model = r.FormValue("embedding_model")
 		appConfig.AI.Embedding.APIKey = r.FormValue("embedding_api_key")
@@ -2724,6 +2734,21 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 		// 登录密码（留空则不启用登录校验；修改后旧会话立即失效）
 		appConfig.Server.Password = r.FormValue("server_password")
 
+		// 提示词覆盖（与内置默认相同则存空 = 使用内置，便于后续升级默认提示词）
+		analyzePrompt := strings.TrimSpace(r.FormValue("prompt_analyze_system"))
+		if analyzePrompt == ai.DefaultAnalyzeSystemPrompt {
+			analyzePrompt = ""
+		}
+		translatePrompt := strings.TrimSpace(r.FormValue("prompt_translate_system"))
+		if translatePrompt == ai.DefaultTranslateSystemPrompt {
+			translatePrompt = ""
+		}
+		appConfig.Prompts.AnalyzeSystem = analyzePrompt
+		appConfig.Prompts.TranslateSystem = translatePrompt
+		if appAnalyzer != nil {
+			appAnalyzer.SetPromptOverrides(analyzePrompt, translatePrompt)
+		}
+
 		// 保存到配置文件
 		if err := saveConfigToFile(); err != nil {
 			w.Header().Set("Content-Type", "text/html")
@@ -2736,6 +2761,72 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`<div class="p-4 bg-green-100 text-green-700 rounded-lg">✅ 设置已保存成功！</div>`))
+}
+
+// FetchModels 拉取 LLM / Embedding 服务的模型列表（用表单草稿值，无需先保存）
+func FetchModels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+	}
+	respond := func(status int, ok bool, msg string, models []string) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": ok, "message": msg, "models": models,
+		})
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond(http.StatusBadRequest, false, "无效的请求数据", nil)
+		return
+	}
+	if req.BaseURL == "" || req.APIKey == "" {
+		respond(http.StatusBadRequest, false, "请先填写 API 地址与 API Key", nil)
+		return
+	}
+
+	url := strings.TrimRight(req.BaseURL, "/") + "/models"
+	httpReq, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	if err != nil {
+		respond(http.StatusBadRequest, false, "构造请求失败: "+err.Error(), nil)
+		return
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		respond(http.StatusBadGateway, false, "请求失败: "+err.Error(), nil)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		respond(http.StatusBadGateway, false, fmt.Sprintf("接口返回 %d: %s", resp.StatusCode, string(body)), nil)
+		return
+	}
+
+	var listResp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		respond(http.StatusBadGateway, false, "解析响应失败: "+err.Error(), nil)
+		return
+	}
+	models := make([]string, 0, len(listResp.Data))
+	for _, m := range listResp.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	if len(models) == 0 {
+		respond(http.StatusOK, false, "接口未返回任何模型", nil)
+		return
+	}
+	respond(http.StatusOK, true, fmt.Sprintf("已拉取 %d 个模型", len(models)), models)
 }
 
 // TestSettingsConnection 测试 LLM / Embedding / 推送通道连接
@@ -2984,6 +3075,7 @@ func saveConfigToFile() error {
 
 	// 预检 server 段内是否已有 password 行（没有则在 server: 行后插入）
 	serverHasPassword := false
+	serverIndent := "  " // server 段属性行缩进（默认 2 空格，与示例配置一致）
 	{
 		inServer := false
 		for _, l := range lines {
@@ -2998,11 +3090,40 @@ func saveConfigToFile() error {
 				} else if strings.HasPrefix(t, "password:") {
 					serverHasPassword = true
 					break
+				} else if serverIndent == "  " && t != "" && !strings.HasPrefix(t, "#") {
+					// 记录段内第一个属性行的缩进，插入时保持一致
+					if i := len(l) - len(strings.TrimLeft(l, " \t")); i > 0 {
+						serverIndent = l[:i]
+					}
 				}
 			}
 		}
 	}
 	inServerSection := false
+	inPromptsSection := false
+
+	// 预检 llm 段内是否已有 fallback 子段（没有则在 model 行后插入完整块）
+	llmHasFallbackSection := false
+	{
+		inLLM, inEmb := false, false
+		for _, l := range lines {
+			t := strings.TrimSpace(l)
+			if strings.HasPrefix(t, "llm:") {
+				inLLM, inEmb = true, false
+				continue
+			}
+			if strings.HasPrefix(t, "embedding:") {
+				inLLM, inEmb = false, true
+				continue
+			}
+			if inLLM && !inEmb && strings.HasPrefix(t, "fallback:") {
+				llmHasFallbackSection = true
+				break
+			}
+		}
+	}
+	inLLMFallback := false    // 当前处于 llm.fallback 子段内
+	llmFallbackIndent := -1   // fallback: 行的缩进，用于判断子段结束
 
 	// 当前所在的配置区域
 	inLLMSection := false
@@ -3020,14 +3141,30 @@ func saveConfigToFile() error {
 		if inServerSection && trimmedLine != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmedLine, "#") {
 			inServerSection = false
 		}
+		// 顶级键开启新段时结束 prompts 段
+		if inPromptsSection && trimmedLine != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmedLine, "#") {
+			inPromptsSection = false
+		}
+		if strings.HasPrefix(trimmedLine, "prompts:") {
+			inPromptsSection = true
+		}
+
+		// 更新 prompts 段提示词覆盖
+		if inPromptsSection {
+			if strings.Contains(line, "analyze_system:") {
+				line = updateYAMLValue(line, appConfig.Prompts.AnalyzeSystem)
+			} else if strings.Contains(line, "translate_system:") {
+				line = updateYAMLValue(line, appConfig.Prompts.TranslateSystem)
+			}
+		}
 
 		// 检测区域
 		if strings.HasPrefix(trimmedLine, "server:") {
 			inServerSection = true
-			// server 段缺 password 行时紧跟 server: 行插入（缩进与示例配置一致）
+			// server 段缺 password 行时紧跟 server: 行插入（缩进与段内属性行一致）
 			if !serverHasPassword {
 				result.WriteString(line + "\n")
-				result.WriteString(fmt.Sprintf("  password: %q\n", appConfig.Server.Password))
+				result.WriteString(fmt.Sprintf("%spassword: %q\n", serverIndent, appConfig.Server.Password))
 				continue
 			}
 		} else if strings.HasPrefix(trimmedLine, "llm:") {
@@ -3074,12 +3211,42 @@ func saveConfigToFile() error {
 
 		// 更新 LLM 配置
 		if inLLMSection && !inEmbeddingSection {
-			if strings.Contains(line, "base_url:") {
-				line = updateYAMLValue(line, appConfig.AI.LLM.BaseURL)
-			} else if strings.Contains(line, "api_key:") {
-				line = updateYAMLValue(line, appConfig.AI.LLM.APIKey)
-			} else if strings.Contains(line, "model:") {
-				line = updateYAMLValue(line, appConfig.AI.LLM.Model)
+			if strings.HasPrefix(trimmedLine, "fallback:") {
+				inLLMFallback = true
+				llmFallbackIndent = len(line) - len(strings.TrimLeft(line, " \t"))
+			} else {
+				curIndent := len(line) - len(strings.TrimLeft(line, " \t"))
+				if inLLMFallback && curIndent <= llmFallbackIndent && trimmedLine != "" && !strings.HasPrefix(trimmedLine, "#") {
+					inLLMFallback = false // 缩进回到 fallback: 同级或更浅，子段结束
+				}
+			}
+			if inLLMFallback && !strings.HasPrefix(trimmedLine, "fallback:") {
+				// fallback 子段内：更新备用 base_url / api_key / model
+				if strings.Contains(line, "base_url:") {
+					line = updateYAMLValue(line, appConfig.AI.LLM.Fallback.BaseURL)
+				} else if strings.Contains(line, "api_key:") {
+					line = updateYAMLValue(line, appConfig.AI.LLM.Fallback.APIKey)
+				} else if strings.Contains(line, "model:") {
+					line = updateYAMLValue(line, appConfig.AI.LLM.Fallback.Model)
+				}
+			} else if !strings.HasPrefix(trimmedLine, "fallback:") {
+				if strings.Contains(line, "base_url:") {
+					line = updateYAMLValue(line, appConfig.AI.LLM.BaseURL)
+				} else if strings.Contains(line, "api_key:") {
+					line = updateYAMLValue(line, appConfig.AI.LLM.APIKey)
+				} else if strings.Contains(line, "model:") {
+					line = updateYAMLValue(line, appConfig.AI.LLM.Model)
+					// llm 段缺 fallback 子段时，在 model 行后按同缩进插入完整备用块
+					if !llmHasFallbackSection {
+						indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+						result.WriteString(line + "\n")
+						result.WriteString(indent + "fallback:\n")
+						result.WriteString(indent + fmt.Sprintf("  base_url: %q\n", appConfig.AI.LLM.Fallback.BaseURL))
+						result.WriteString(indent + fmt.Sprintf("  api_key: %q\n", appConfig.AI.LLM.Fallback.APIKey))
+						result.WriteString(indent + fmt.Sprintf("  model: %q\n", appConfig.AI.LLM.Fallback.Model))
+						continue
+					}
+				}
 			}
 		}
 
@@ -3161,6 +3328,12 @@ func saveConfigToFile() error {
 	if !strings.Contains(string(originalContent), "proxy:") && !proxySectionSeen {
 		result.WriteString(fmt.Sprintf("\n# 代理设置（内容抓取与 LLM 接口可分别启用）\nproxy:\n    url: \"%s\"\n    enable_content: %t\n    enable_llm: %t\n",
 			appConfig.Proxy.URL, appConfig.Proxy.EnableContent, appConfig.Proxy.EnableLLM))
+	}
+
+	// prompts 段：文件中没有时追加到尾部（已有则在上面循环中行内更新）
+	if !strings.Contains(string(originalContent), "prompts:") {
+		result.WriteString(fmt.Sprintf("\n# 提示词覆盖（留空使用内置默认，可在设置页编辑）\nprompts:\n  analyze_system: %q\n  translate_system: %q\n",
+			appConfig.Prompts.AnalyzeSystem, appConfig.Prompts.TranslateSystem))
 	}
 
 	return os.WriteFile(configFilePath, []byte(result.String()), 0644)
@@ -3613,6 +3786,9 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings.LLMBaseURL = appConfig.AI.LLM.BaseURL
 		settings.LLMModel = appConfig.AI.LLM.Model
 		settings.LLMAPIKey = appConfig.AI.LLM.APIKey
+		settings.LLMFallbackBaseURL = appConfig.AI.LLM.Fallback.BaseURL
+		settings.LLMFallbackAPIKey = appConfig.AI.LLM.Fallback.APIKey
+		settings.LLMFallbackModel = appConfig.AI.LLM.Fallback.Model
 		settings.EmbeddingBaseURL = appConfig.AI.Embedding.BaseURL
 		settings.EmbeddingModel = appConfig.AI.Embedding.Model
 		settings.EmbeddingAPIKey = appConfig.AI.Embedding.APIKey
@@ -3637,6 +3813,15 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings.ProxyEnableLLM = appConfig.Proxy.EnableLLM
 		// 登录密码
 		settings.ServerPassword = appConfig.Server.Password
+		// 提示词（显示当前生效值：自定义优先，否则内置默认）
+		settings.PromptAnalyzeSystem = ai.DefaultAnalyzeSystemPrompt
+		settings.PromptTranslateSystem = ai.DefaultTranslateSystemPrompt
+		if appConfig.Prompts.AnalyzeSystem != "" {
+			settings.PromptAnalyzeSystem = appConfig.Prompts.AnalyzeSystem
+		}
+		if appConfig.Prompts.TranslateSystem != "" {
+			settings.PromptTranslateSystem = appConfig.Prompts.TranslateSystem
+		}
 	}
 
 	data := PageData{

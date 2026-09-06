@@ -21,7 +21,13 @@ ai:
     base_url: "https://api.deepseek.com/v1"
     api_key: "your-api-key-here"
     model: "deepseek-chat"
+    # 备用 LLM：主模型失败时自动切换（地址/Key 留空沿用主配置；model 留空不启用）
+    fallback:
+      base_url: ""
+      api_key: ""
+      model: ""
     timeout: "60s"
+    retry_interval: "3s"  # 重试基础间隔（指数退避：3s、6s、12s...封顶60s）
 
   # Embedding 配置（用于向量化）
   embedding:
@@ -86,3 +92,8 @@ push:
 event_matcher:
   match_threshold: 0.65          # 综合匹配阈值 (0-1)，越大越严格
   vector_min_similarity: 0.45    # 向量相似度最低阈值 (0-1)，越大越严格
+
+# 提示词覆盖（留空使用程序内置默认，可在设置页编辑；修改后立即生效）
+prompts:
+  analyze_system: ""
+  translate_system: ""

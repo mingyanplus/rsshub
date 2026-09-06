@@ -19,33 +19,65 @@ import (
 // 默认冷却时间：遇到 503 后暂停 5 分钟
 const defaultCooldownDuration = 5 * time.Minute
 
+// maxRetryBackoff 重试退避等待上限
+const maxRetryBackoff = 60 * time.Second
+
 // LLMClient LLM 客户端
 type LLMClient struct {
-	maxRetries int
-	baseURL    string
-	apiKey     string
-	model      string
-	timeout    time.Duration
-	userAgent  string
-	httpClient *http.Client
+	maxRetries      int
+	baseURL         string
+	apiKey          string
+	model           string
+	fallback        *LLMClient // 备用 LLM（独立端点、独立冷却），主模型失败时自动切换
+	timeout         time.Duration
+	retryBaseDelay  time.Duration // 重试基础间隔（指数退避）
+	userAgent       string
+	httpClient      *http.Client
 
 	mu            sync.Mutex
 	cooldownUntil time.Time // API 不可用时的冷却截止时间
 }
 
+// newFallbackClient 由备用配置构造备用客户端（留空项沿用主配置；不再嵌套二级备用）
+func newFallbackClient(main *config.LLMConfig, timeout time.Duration, httpClient *http.Client) *LLMClient {
+	fb := main.Fallback
+	baseURL, apiKey := fb.BaseURL, fb.APIKey
+	if baseURL == "" {
+		baseURL = main.BaseURL
+	}
+	if apiKey == "" {
+		apiKey = main.APIKey
+	}
+	ua := main.UserAgent
+	return &LLMClient{
+		baseURL:    baseURL,
+		apiKey:     apiKey,
+		model:      fb.Model,
+		timeout:    timeout,
+		maxRetries: main.MaxRetries,
+		userAgent:  ua,
+		httpClient: &http.Client{Timeout: timeout},
+	}
+}
+
 // NewLLMClient 创建 LLM 客户端
 func NewLLMClient(cfg *config.LLMConfig) *LLMClient {
-	return &LLMClient{
-		baseURL:    cfg.BaseURL,
-		apiKey:     cfg.APIKey,
-		model:      cfg.Model,
-		timeout:    cfg.Timeout,
-		maxRetries: cfg.MaxRetries,
-		userAgent:  cfg.UserAgent,
+	c := &LLMClient{
+		baseURL:        cfg.BaseURL,
+		apiKey:         cfg.APIKey,
+		model:          cfg.Model,
+		timeout:        cfg.Timeout,
+		maxRetries:     cfg.MaxRetries,
+		retryBaseDelay: cfg.RetryInterval,
+		userAgent:      cfg.UserAgent,
 		httpClient: &http.Client{
 			Timeout: cfg.Timeout,
 		},
 	}
+	if cfg.Fallback.Model != "" {
+		c.fallback = newFallbackClient(cfg, cfg.Timeout, nil)
+	}
+	return c
 }
 
 // UpdateConfig 更新客户端配置（支持热重载）
@@ -55,13 +87,35 @@ func (c *LLMClient) UpdateConfig(cfg *config.LLMConfig) {
 	c.model = cfg.Model
 	c.timeout = cfg.Timeout
 	c.maxRetries = cfg.MaxRetries
+	c.retryBaseDelay = cfg.RetryInterval
 	c.userAgent = cfg.UserAgent
 	c.httpClient.Timeout = cfg.Timeout
+	if cfg.Fallback.Model != "" {
+		c.fallback = newFallbackClient(cfg, cfg.Timeout, nil)
+	} else {
+		c.fallback = nil
+	}
 }
 
-// SetProxy 设置 LLM 接口代理；proxyURL 为空时清除
+// retryDelay 计算第 attempt 次失败后的重试等待（指数退避：base×1、base×2、base×4...，封顶 60s）
+func (c *LLMClient) retryDelay(attempt int) time.Duration {
+	base := c.retryBaseDelay
+	if base <= 0 {
+		base = 3 * time.Second
+	}
+	delay := base << (attempt - 1) // 位移翻倍
+	if delay > maxRetryBackoff || delay <= 0 {
+		delay = maxRetryBackoff
+	}
+	return delay
+}
+
+// SetProxy 设置 LLM 接口代理；proxyURL 为空时清除（同步备用客户端）
 func (c *LLMClient) SetProxy(proxyURL string) {
 	proxyutil.Apply(c.httpClient, proxyURL)
+	if c.fallback != nil {
+		proxyutil.Apply(c.fallback.httpClient, proxyURL)
+	}
 }
 
 // Model 返回当前使用的模型名称
@@ -116,33 +170,55 @@ type ChatResponse struct {
 
 // Chat 发送聊天请求（普通文本模式）
 func (c *LLMClient) Chat(ctx context.Context, prompt string) (string, error) {
-	return c.chatWithFormat(ctx, prompt, nil)
+	return c.chatCore(ctx, "", prompt, nil, 0)
 }
 
 // ChatJSON 发送聊天请求（JSON 输出模式）
 func (c *LLMClient) ChatJSON(ctx context.Context, prompt string) (string, error) {
 	format := &ResponseFormat{Type: "json_object"}
-	return c.chatWithFormat(ctx, prompt, format)
+	return c.chatCore(ctx, "", prompt, format, 0)
+}
+
+// ChatWithSystem 发送聊天请求（system 指令与 user 内容分离，system 前缀稳定利于 LLM 服务商的 context caching）
+func (c *LLMClient) ChatWithSystem(ctx context.Context, system, prompt string) (string, error) {
+	return c.chatCore(ctx, system, prompt, nil, 0)
+}
+
+// ChatJSONWithSystem 发送聊天请求（JSON 输出模式 + system 指令分离）
+func (c *LLMClient) ChatJSONWithSystem(ctx context.Context, system, prompt string) (string, error) {
+	format := &ResponseFormat{Type: "json_object"}
+	return c.chatCore(ctx, system, prompt, format, 0)
 }
 
 // ChatWithDeepThinking 发送聊天请求（深度思考模式）
 func (c *LLMClient) ChatWithDeepThinking(ctx context.Context, prompt string, thinkingBudget int) (string, error) {
-	return c.chatWithFormatAndThinking(ctx, prompt, nil, thinkingBudget)
+	return c.chatCore(ctx, "", prompt, nil, thinkingBudget)
 }
 
 // ChatJSONWithDeepThinking 发送聊天请求（JSON + 深度思考模式）
 func (c *LLMClient) ChatJSONWithDeepThinking(ctx context.Context, prompt string, thinkingBudget int) (string, error) {
 	format := &ResponseFormat{Type: "json_object"}
-	return c.chatWithFormatAndThinking(ctx, prompt, format, thinkingBudget)
+	return c.chatCore(ctx, "", prompt, format, thinkingBudget)
 }
 
-// chatWithFormat 发送聊天请求（支持响应格式和重试）
-func (c *LLMClient) chatWithFormat(ctx context.Context, prompt string, format *ResponseFormat) (string, error) {
-	return c.chatWithFormatAndThinking(ctx, prompt, format, 0)
+// chatCore 发送聊天请求（统一入口：支持 system、响应格式、重试与备用 LLM 自动降级）
+func (c *LLMClient) chatCore(ctx context.Context, system, prompt string, format *ResponseFormat, thinkingBudget int) (string, error) {
+	result, err := c.chatWithModel(ctx, system, prompt, format, thinkingBudget, c.model)
+	if err == nil || c.fallback == nil {
+		return result, err
+	}
+	// 主模型失败（重试耗尽/冷却/内容过滤等），自动切换备用 LLM（独立端点、独立重试与冷却）再试
+	log.Printf("LLM 主模型 %s 请求失败: %v，切换备用模型 %s 重试", c.model, err, c.fallback.model)
+	result2, err2 := c.fallback.chatWithModel(ctx, system, prompt, format, thinkingBudget, c.fallback.model)
+	if err2 == nil {
+		return result2, nil
+	}
+	return "", fmt.Errorf("LLM 主模型 %s 与备用模型 %s 均失败: 主模型错误: %v; 备用模型错误: %v",
+		c.model, c.fallback.model, err, err2)
 }
 
-// chatWithFormatAndThinking 发送聊天请求（支持响应格式、重试和深度思考）
-func (c *LLMClient) chatWithFormatAndThinking(ctx context.Context, prompt string, format *ResponseFormat, thinkingBudget int) (string, error) {
+// chatWithModel 以指定模型发送请求（支持响应格式、重试和深度思考）
+func (c *LLMClient) chatWithModel(ctx context.Context, system, prompt string, format *ResponseFormat, thinkingBudget int, model string) (string, error) {
 	// 检查是否在冷却期
 	c.mu.Lock()
 	if time.Now().Before(c.cooldownUntil) {
@@ -159,12 +235,12 @@ func (c *LLMClient) chatWithFormatAndThinking(ctx context.Context, prompt string
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		result, err := c.doChatRequestWithThinking(ctx, prompt, format, thinkingBudget)
+		result, err := c.doChatRequestWithThinking(ctx, system, prompt, format, thinkingBudget, model)
 		if err == nil {
 			return result, nil
 		}
 		lastErr = err
-		log.Printf("LLM 请求失败 (尝试 %d/%d): %v", attempt, maxRetries, err)
+		log.Printf("LLM 请求失败 (model=%s, 尝试 %d/%d): %v", model, attempt, maxRetries, err)
 
 		// 503 表示 API key 池耗尽，不再重试，直接进入冷却
 		if isUnavailableError(err) {
@@ -181,24 +257,29 @@ func (c *LLMClient) chatWithFormatAndThinking(ctx context.Context, prompt string
 			return "", fmt.Errorf("LLM 内容安全过滤: %w", lastErr)
 		}
 
-		// 如果不是最后一次尝试，等待一段时间后重试
+		// 如果不是最后一次尝试，指数退避后重试（如 3s、6s、12s，封顶 60s）
 		if attempt < maxRetries {
-			time.Sleep(time.Duration(attempt) * time.Second)
+			time.Sleep(c.retryDelay(attempt))
 		}
 	}
 	return "", fmt.Errorf("LLM 请求失败，已重试 %d 次: %w", maxRetries, lastErr)
 }
 
 // doChatRequest 执行单次聊天请求
-func (c *LLMClient) doChatRequest(ctx context.Context, prompt string, format *ResponseFormat) (string, error) {
-	return c.doChatRequestWithThinking(ctx, prompt, format, 0)
+func (c *LLMClient) doChatRequest(ctx context.Context, system, prompt string, format *ResponseFormat) (string, error) {
+	return c.doChatRequestWithThinking(ctx, system, prompt, format, 0, c.model)
 }
 
 // doChatRequestWithThinking 执行单次聊天请求（非流式模式）
-func (c *LLMClient) doChatRequestWithThinking(ctx context.Context, prompt string, format *ResponseFormat, thinkingBudget int) (string, error) {
+func (c *LLMClient) doChatRequestWithThinking(ctx context.Context, system, prompt string, format *ResponseFormat, thinkingBudget int, model string) (string, error) {
+	messages := make([]ChatMessage, 0, 2)
+	if system != "" {
+		messages = append(messages, ChatMessage{Role: "system", Content: system})
+	}
+	messages = append(messages, ChatMessage{Role: "user", Content: prompt})
 	reqBody := ChatRequest{
-		Model:    c.model,
-		Messages: []ChatMessage{{Role: "user", Content: prompt}},
+		Model:    model,
+		Messages: messages,
 		Stream:   false,
 	}
 	if format != nil {
@@ -244,7 +325,7 @@ func (c *LLMClient) doChatRequestWithThinking(ctx context.Context, prompt string
 		// （prompt 已要求 JSON 输出，调用方配合 ExtractJSONFromResponse 解析）
 		if format != nil && strings.Contains(string(respBody), "response_format") {
 			log.Printf("LLM API 拒绝 response_format，降级为纯文本模式重试")
-			return c.doChatRequestWithThinking(ctx, prompt, nil, thinkingBudget)
+			return c.doChatRequestWithThinking(ctx, system, prompt, nil, thinkingBudget, model)
 		}
 		return "", fmt.Errorf("%s", errMsg)
 	}
