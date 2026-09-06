@@ -269,6 +269,9 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 		// 兴趣簇每日衰减（与生命周期检查同频）
 		interestDecayInterval := 24 * time.Hour
 
+		// 评估指标周报（每周一次）
+		metricsWeeklyInterval := 7 * 24 * time.Hour
+
 		// 初始延迟（启动后30秒开始第一次任务）
 		initialDelay := 30 * time.Second
 
@@ -286,6 +289,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 		hotTopicTicker := time.NewTicker(hotTopicInterval)   // 热点检测
 		lifecycleTicker := time.NewTicker(lifecycleCheckInterval) // 生命周期检查
 		interestDecayTicker := time.NewTicker(interestDecayInterval) // 兴趣簇衰减
+		metricsWeeklyTicker := time.NewTicker(metricsWeeklyInterval) // 评估指标周报
 
 		// 记录上次生成报告的日期，防止重复生成
 		var lastMorningReportDate, lastEveningReportDate, lastDailyReportDate string
@@ -314,6 +318,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 				hotTopicTicker.Stop()
 				lifecycleTicker.Stop()
 				interestDecayTicker.Stop()
+				metricsWeeklyTicker.Stop()
 				logger.Info("Scheduler stopped")
 				return
 
@@ -390,12 +395,29 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 				go autoPauseInactiveEvents(db, 7) // 7天无更新自动暂停
 
 			case <-interestDecayTicker.C:
-				// 兴趣簇每日衰减与淘汰（推荐方案 §3.2）
+				// 兴趣簇每日衰减与淘汰（推荐方案 §3.2）+ 通道跳过惩罚（§7.2）
 				logger.Debug("Running interest profile decay...")
 				go func() {
 					if err := interestProfile.ApplyDailyDecay(); err != nil {
 						logger.Error("兴趣簇衰减失败: %v", err)
 					}
+					if err := processor.NewRecommender(db, interestProfile).ApplyChannelSkipPenalty(); err != nil {
+						logger.Error("通道跳过惩罚失败: %v", err)
+					}
+				}()
+
+			case <-metricsWeeklyTicker.C:
+				// 防茧房评估指标周报（方案 §8）
+				logger.Info("Running recommendation metrics...")
+				go func() {
+					m, err := processor.NewRecommender(db, interestProfile).ComputeMetrics()
+					if err != nil {
+						logger.Error("推荐指标计算失败: %v", err)
+						return
+					}
+					healthy := m.Healthy()
+					logger.Info("[推荐周报] 主题覆盖率 %.1f%% (健康>60%%) | 主题熵 %.2f (健康>2.0) | 推荐相似度 %.2f (健康<0.6) | 探索点击率 %.2f (健康>0.3) | 健康: %v",
+						m.TopicCoverage*100, m.TopicEntropy, m.AvgRecSim, m.ExploreCTR, healthy)
 				}()
 			}
 		}

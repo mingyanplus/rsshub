@@ -414,5 +414,11 @@ CREATE TABLE IF NOT EXISTS report_articles (
 	d.db.Exec(`ALTER TABLE articles ADD COLUMN is_favorite BOOLEAN DEFAULT FALSE`)
 	d.db.Exec(`ALTER TABLE articles ADD COLUMN not_interested BOOLEAN DEFAULT FALSE`)
 
+	// 通道权重（P5 通道权重自适应：点击 ×1.1 / 跳过 ×0.95，定期归一化）
+	d.db.Exec(`CREATE TABLE IF NOT EXISTS channel_weights (
+		channel TEXT PRIMARY KEY,
+		weight REAL NOT NULL DEFAULT 1
+	)`)
+
 	return nil
 }

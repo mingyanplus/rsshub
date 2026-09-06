@@ -54,6 +54,17 @@
         </div>
     </div>
 
+    <!-- 防茧房评估指标（推荐系统周报，方案 §8） -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="font-semibold text-gray-800 flex items-center gap-2 mb-4">
+            <span>🧭</span> 防茧房评估指标
+            <span class="text-xs text-gray-400 font-normal">主题覆盖、推荐多样性、探索价值的一周体检</span>
+        </h3>
+        <div id="rec-metrics" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="text-sm text-gray-400 col-span-4">加载中…</div>
+        </div>
+    </div>
+
     <!-- 数据备份 -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 class="font-semibold text-gray-800 flex items-center gap-2 mb-4">
@@ -297,5 +308,45 @@ function importData() {
         document.getElementById('import-result').innerHTML = `<span class="text-red-600">✗ 导入失败: ${err}</span>`;
     });
 }
+
+// 防茧房评估指标（推荐系统，方案 §8）
+function renderRecMetrics(data) {
+    const el = document.getElementById('rec-metrics');
+    if (!data || !data.metrics) {
+        el.innerHTML = '<div class="text-sm text-gray-400 col-span-4">暂无数据</div>';
+        return;
+    }
+    const m = data.metrics, h = data.healthy || {};
+    const badge = (ok) => ok
+        ? '<span class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">健康</span>'
+        : '<span class="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">待改善</span>';
+    const fmt = (v, pct) => pct ? (v * 100).toFixed(0) + '%' : v.toFixed(2);
+    el.innerHTML = `
+        <div class="border border-gray-200 rounded-lg p-4">
+            <p class="text-sm text-gray-500 mb-1">主题覆盖率 ${badge(h.topic_coverage)}</p>
+            <p class="text-2xl font-bold text-gray-900">${fmt(m.topic_coverage, true)}</p>
+            <p class="text-xs text-gray-400 mt-1">已读主题 / 全部主题 · 健康 &gt; 60%</p>
+        </div>
+        <div class="border border-gray-200 rounded-lg p-4">
+            <p class="text-sm text-gray-500 mb-1">主题熵 ${badge(h.topic_entropy)}</p>
+            <p class="text-2xl font-bold text-gray-900">${fmt(m.topic_entropy)}</p>
+            <p class="text-xs text-gray-400 mt-1">阅读分布多样性 · 健康 &gt; 2.0</p>
+        </div>
+        <div class="border border-gray-200 rounded-lg p-4">
+            <p class="text-sm text-gray-500 mb-1">推荐相似度 ${badge(h.avg_rec_sim)}</p>
+            <p class="text-2xl font-bold text-gray-900">${fmt(m.avg_rec_sim)}</p>
+            <p class="text-xs text-gray-400 mt-1">推荐列表两两相似度 · 健康 &lt; 0.6（过高=同质化）</p>
+        </div>
+        <div class="border border-gray-200 rounded-lg p-4">
+            <p class="text-sm text-gray-500 mb-1">探索点击率 ${badge(h.explore_ctr)}</p>
+            <p class="text-2xl font-bold text-gray-900">${fmt(m.explore_ctr)}</p>
+            <p class="text-xs text-gray-400 mt-1">探索通道 / 精准通道 · 健康 &gt; 0.3</p>
+        </div>`;
+}
+
+fetch('/api/recommendations/metrics')
+    .then(res => res.ok ? res.json() : null)
+    .then(renderRecMetrics)
+    .catch(() => renderRecMetrics(null));
 </script>
 {{end}}

@@ -411,8 +411,9 @@ func NewRouter() *Router {
 		// 行为采集（推荐系统 P1：曝光异步批量上报）
 		r.Post("/behavior/exposures", ReportExposures)
 
-		// 推荐列表（P3：多因子打分 + 推荐理由）
+		// 推荐列表（P3：多因子打分 + 推荐理由；P5：curated/discover 双模式）
 		r.Get("/recommendations", GetRecommendations)
+		r.Get("/recommendations/metrics", GetRecommendationMetrics)
 
 		// 文章列表
 		r.Get("/articles", ListArticles)
@@ -1921,6 +1922,24 @@ func ListArticles(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetRecommendationMetrics 防茧房评估指标（方案 §8：覆盖率/熵/相似度/探索点击率）
+func GetRecommendationMetrics(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil || appInterestProfile == nil {
+		http.Error(w, "Recommender not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	metrics, err := processor.NewRecommender(appDB, appInterestProfile).ComputeMetrics()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to compute metrics: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"metrics": metrics,
+		"healthy": metrics.Healthy(),
+	})
+}
 // ListArticlesHTML 返回文章列表 HTML 片段（用于 HTMX 筛选）
 func ListArticlesHTML(w http.ResponseWriter, r *http.Request) {
 	if appDB == nil {
@@ -2146,6 +2165,12 @@ func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
 	}
 	// 打开过预览即视为对曝光的点击（失败不影响主流程）
 	appDB.MarkExposureClicked(id)
+	// 通道权重自适应：被点击的文章所属通道权重 ×1.1（异步，方案 §7.2）
+	if appInterestProfile != nil {
+		if ch, err := appDB.LatestExposureChannel(id); err == nil && ch != "" {
+			go processor.NewRecommender(appDB, appInterestProfile).AdjustChannelWeight(ch, 1.1)
+		}
+	}
 	// 反馈闭环：读完入正簇、秒退入负簇（方案 §7.1）
 	switch action {
 	case "read_complete":
@@ -2267,9 +2292,18 @@ func GetRecommendations(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
+	mode := r.URL.Query().Get("mode") // curated（默认精选）/ discover（拓展发现）
 
 	recommender := processor.NewRecommender(appDB, appInterestProfile)
-	scored, err := recommender.Recommend(limit)
+	var (
+		scored []*processor.ScoredArticle
+		err    error
+	)
+	if mode == "discover" {
+		scored, err = recommender.RecommendMode("discover", limit)
+	} else {
+		scored, err = recommender.Recommend(limit)
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to recommend: %v", err), http.StatusInternalServerError)
 		return
