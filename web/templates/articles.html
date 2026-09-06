@@ -163,9 +163,9 @@
             </select>
 
             <select id="sort-mode" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm" title="智能推荐按兴趣画像排序；拓展发现以邻接主题与盲区补全为主，扩大视野">
-                <option value="latest">🕒 最新</option>
-                <option value="recommend">✨ 为你精选</option>
+                <option value="recommend" selected>✨ 为你精选</option>
                 <option value="discover">🧭 拓展发现</option>
+                <option value="latest">🕒 最新</option>
             </select>
 
             <!-- 标签筛选显示 -->
@@ -266,7 +266,7 @@ let currentOffset = 0;
 let isLoading = false;
 let hasMore = true;
 let selectedArticleId = null;
-let recommendMode = false; // 智能推荐模式：走推荐 API，一次取全量不分页
+let recommendMode = true; // 默认「为你精选」：按兴趣画像排序（切回"最新"恢复时间序）
 const pageSize = 20;
 
 // 标记文章为已读
