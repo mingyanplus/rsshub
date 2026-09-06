@@ -3,7 +3,6 @@ package processor
 import (
 	"fmt"
 	"math"
-	"sort"
 	"time"
 
 	"rss-ai/internal/ai"
@@ -66,16 +65,27 @@ func NewRecommender(db *database.DB, profile *InterestProfile) *Recommender {
 	return &Recommender{db: db, profile: profile}
 }
 
-// Recommend 生成推荐列表：候选池 → 多因子打分 → 按分排序
+// Recommend 生成推荐列表（精选模式默认配比）：五路召回 → 多因子打分 → MMR 重排
 func (r *Recommender) Recommend(limit int) ([]*ScoredArticle, error) {
+	return r.RecommendWithMix(limit, defaultChannelMix)
+}
+
+// RecommendWithMix 按指定通道配比推荐（P5 双模式：curated / discover 查不同配比表）
+func (r *Recommender) RecommendWithMix(limit int, mix map[string]float64) ([]*ScoredArticle, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	candidates, err := r.db.ListRecommendationCandidates(limit * 3) // 打分后重排，多取一些
+	candidates, err := r.db.ListRecommendationCandidates(limit*recallCandidateFactor, exposureCooldownDays)
 	if err != nil {
 		return nil, err
 	}
 	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// 五路召回（含曝光冷却过滤，候选池查询已剔除冷却文章）
+	recalled := r.recall(candidates, limit, mix)
+	if len(recalled) == 0 {
 		return nil, nil
 	}
 
@@ -92,7 +102,7 @@ func (r *Recommender) Recommend(limit int) ([]*ScoredArticle, error) {
 
 	now := time.Now()
 	var scored []*ScoredArticle
-	for _, cand := range candidates {
+	for _, cand := range recalled {
 		a := cand.Article
 		var vec []float32
 		if cand.HasVec {
@@ -110,20 +120,13 @@ func (r *Recommender) Recommend(limit int) ([]*ScoredArticle, error) {
 		} else {
 			s = scoreFallback(a, authority, feedStats, now)
 		}
-		// P3 双通道标记：兴趣分 > 0 为精准，其余为新鲜度
-		if s.Interest > 0 {
-			s.Channel = ChannelPrecise
-		} else {
-			s.Channel = ChannelFreshness
-		}
+		// 通道标记以召回结果为准（召回阶段已做配额分配）
+		s.Channel = cand.Channel
 		scored = append(scored, s)
 	}
 
-	sort.SliceStable(scored, func(i, j int) bool { return scored[i].Score > scored[j].Score })
-	if len(scored) > limit {
-		scored = scored[:limit]
-	}
-	return scored, nil
+	// MMR + 主题配额 + 探索保底
+	return rerankAndFinalize(scored, limit), nil
 }
 
 // scoreFull 完整多因子打分（§5 公式）

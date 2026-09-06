@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"time"
 
 	"rss-ai/internal/models"
 )
@@ -9,7 +10,8 @@ import (
 // RecommendationCandidate 推荐候选文章（未读 + 非广告 + 非不感兴趣，含向量）
 type RecommendationCandidate struct {
 	Article *models.Article
-	HasVec  bool // 是否带有可用的 embedding
+	HasVec  bool   // 是否带有可用的 embedding
+	Channel string // 召回通道标记（precise/adjacent/coverage/freshness/random）
 }
 
 // FeedBehaviorStats 订阅源行为统计（来源分用）
@@ -22,16 +24,22 @@ type FeedBehaviorStats struct {
 }
 
 // ListRecommendationCandidates 推荐候选池：未读 + 非广告 + 非不感兴趣，按时间倒序取 limit 篇
-func (d *DB) ListRecommendationCandidates(limit int) ([]*RecommendationCandidate, error) {
+// 冷却规则：曝光超过 cooldownDays 天仍未点击的文章剔除（方案 §4）
+func (d *DB) ListRecommendationCandidates(limit int, cooldownDays int) ([]*RecommendationCandidate, error) {
 	rows, err := d.db.Query(`
 		SELECT a.id, a.feed_id, a.title, a.link, a.summary, a.ai_summary, a.keywords, a.tags_cache,
 		       a.is_ad, a.published_at, a.fetched_at, a.is_read, a.is_favorite, a.not_interested,
-		       a.embedding, a.summary_embedding
+		       a.embedding, a.summary_embedding, a.topic_category
 		FROM articles a
 		WHERE a.is_read = FALSE AND a.is_ad = FALSE AND a.not_interested = FALSE
+		  AND NOT EXISTS (
+			SELECT 1 FROM exposures e
+			WHERE e.article_id = a.id AND e.clicked = 0
+			  AND e.exposed_at < ?
+		  )
 		ORDER BY COALESCE(a.published_at, a.fetched_at) DESC
 		LIMIT ?
-	`, limit)
+	`, time.Now().AddDate(0, 0, -cooldownDays).Unix(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -40,16 +48,17 @@ func (d *DB) ListRecommendationCandidates(limit int) ([]*RecommendationCandidate
 	var result []*RecommendationCandidate
 	for rows.Next() {
 		a := &models.Article{}
-		var summary, aiSummary, keywords, tagsCache sql.NullString
+		var summary, aiSummary, keywords, tagsCache, topicCategory sql.NullString
 		if err := rows.Scan(&a.ID, &a.FeedID, &a.Title, &a.Link, &summary, &aiSummary, &keywords, &tagsCache,
 			&a.IsAd, &a.PublishedAt, &a.FetchedAt, &a.IsRead, &a.IsFavorite, &a.NotInterested,
-			&a.Embedding, &a.SummaryEmbedding); err != nil {
+			&a.Embedding, &a.SummaryEmbedding, &topicCategory); err != nil {
 			return nil, err
 		}
 		a.Summary = summary.String
 		a.AISummary = aiSummary.String
 		a.Keywords = keywords.String
 		a.TagsCache = tagsCache.String
+		a.TopicCategory = topicCategory.String
 		result = append(result, &RecommendationCandidate{
 			Article: a,
 			HasVec:  len(a.Embedding) > 0 || len(a.SummaryEmbedding) > 0,
@@ -109,4 +118,26 @@ func (d *DB) ListFeedBehaviorStats() (map[int64]*FeedBehaviorStats, error) {
 	}
 	rows.Close()
 	return stats, nil
+}
+
+// ListReadTopicDistribution 已读文章的主题类别分布（coverage 通道用：找阅读占比 <2% 的盲区）
+func (d *DB) ListReadTopicDistribution() (map[string]int, int, error) {
+	rows, err := d.db.Query(`SELECT topic_category, COUNT(*) FROM articles WHERE is_read = TRUE GROUP BY topic_category`)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	dist := make(map[string]int)
+	total := 0
+	for rows.Next() {
+		var cat string
+		var n int
+		if err := rows.Scan(&cat, &n); err != nil {
+			return nil, 0, err
+		}
+		dist[cat] = n
+		total += n
+	}
+	return dist, total, rows.Err()
 }
