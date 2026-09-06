@@ -388,11 +388,17 @@ func NewRouter() *Router {
 		r.Post("/feeds/test-source", TestSource)
 		r.Post("/feeds/parse-curl", ParseCurl)
 
+		// 行为采集（推荐系统 P1：曝光异步批量上报）
+		r.Post("/behavior/exposures", ReportExposures)
+
 		// 文章列表
 		r.Get("/articles", ListArticles)
 		r.Get("/articles/html", ListArticlesHTML)
 		r.Post("/articles/{id}/fetch-original", FetchOriginalContent)
 		r.Post("/articles/{id}/read", MarkArticleRead)
+		r.Post("/articles/{id}/behavior", ReportArticleBehavior)
+		r.Post("/articles/{id}/favorite", ToggleArticleFavorite)
+		r.Post("/articles/{id}/not-interested", MarkArticleNotInterested)
 		r.Get("/articles/{id}", GetArticle)
 		r.Post("/articles/process-pending", ProcessPendingArticles)
 		r.Post("/articles/retry-failed", RetryFailedArticles)
@@ -2041,6 +2047,8 @@ func GetArticle(w http.ResponseWriter, r *http.Request) {
 		"is_ad":           article.IsAd,
 		"ad_reason":         article.AdReason,
 		"translated_content": article.TranslatedContent,
+		"is_favorite":        article.IsFavorite,
+		"not_interested":     article.NotInterested,
 	}
 
 	json.NewEncoder(w).Encode(response)
@@ -2064,6 +2072,150 @@ func MarkArticleRead(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// BehaviorReportRequest 前端上报的阅读行为（原始信号，服务端负责分类）
+type BehaviorReportRequest struct {
+	Progress float64 `json:"progress"`  // 滚动进度 0~1
+	DwellMs  int64   `json:"dwell_ms"`  // 停留时长毫秒
+}
+
+// classifyReadAction 按行为阈值判定信号分类（推荐方案 §2.4）
+//   read_complete: progress ≥ 0.9，或（progress ≥ 0.75 且 dwell ≥ 90s）
+//   quick_bounce: dwell < 8s 且 progress < 0.1
+//   open: 其余情况
+func classifyReadAction(progress float64, dwellMs int64) string {
+	if progress >= 0.9 || (progress >= 0.75 && dwellMs >= 90000) {
+		return "read_complete"
+	}
+	if dwellMs < 8000 && progress < 0.1 {
+		return "quick_bounce"
+	}
+	return "open"
+}
+
+// ReportArticleBehavior 上报阅读行为（切换/关闭文章预览时触发），写日志并标记曝光点击
+func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil {
+		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid article ID", http.StatusBadRequest)
+		return
+	}
+	var req BehaviorReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	// 夹紧进度到 [0, 1]
+	if req.Progress < 0 {
+		req.Progress = 0
+	} else if req.Progress > 1 {
+		req.Progress = 1
+	}
+	action := classifyReadAction(req.Progress, req.DwellMs)
+	if err := appDB.InsertReadLog(id, action, req.Progress, req.DwellMs); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to insert read log: %v", err), http.StatusInternalServerError)
+		return
+	}
+	// 打开过预览即视为对曝光的点击（失败不影响主流程）
+	appDB.MarkExposureClicked(id)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "action": action})
+}
+
+// ToggleArticleFavorite 收藏/取消收藏（写行为日志 + 持久化状态）
+func ToggleArticleFavorite(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil {
+		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid article ID", http.StatusBadRequest)
+		return
+	}
+	article, err := appDB.GetArticleByID(id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Article not found: %v", err), http.StatusNotFound)
+		return
+	}
+	favorite := !article.IsFavorite
+	action := "favorite"
+	if !favorite {
+		action = "unfavorite"
+	}
+	if err := appDB.SetArticleFavorite(id, favorite); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update favorite: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err := appDB.InsertReadLog(id, action, 0, 0); err != nil {
+		log.Printf("写入收藏日志失败: %v", err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "is_favorite": favorite})
+}
+
+// MarkArticleNotInterested 标记文章为不感兴趣（推荐强负反馈）
+func MarkArticleNotInterested(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil {
+		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid article ID", http.StatusBadRequest)
+		return
+	}
+	if err := appDB.SetArticleNotInterested(id); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to mark not interested: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err := appDB.InsertReadLog(id, "not_interested", 0, 0); err != nil {
+		log.Printf("写不感兴趣日志失败: %v", err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// ExposureReportItem 前端攒批上报的单条曝光
+type ExposureReportItem struct {
+	ArticleID int64  `json:"article_id"`
+	Position  int    `json:"position"`
+	Channel   string `json:"channel"`
+}
+
+// ReportExposures 批量写入曝光记录（前端攒满或定时 flush，不进阅读请求路径）
+func ReportExposures(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil {
+		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+		return
+	}
+	var items []ExposureReportItem
+	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	records := make([]database.ExposureRecord, 0, len(items))
+	for _, it := range items {
+		if it.ArticleID <= 0 {
+			continue
+		}
+		records = append(records, database.ExposureRecord{
+			ArticleID: it.ArticleID,
+			Position:  it.Position,
+			Channel:   it.Channel,
+		})
+	}
+	if err := appDB.InsertExposures(records); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to insert exposures: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "count": len(records)})
 }
 
 // FetchOriginalContent 从文章原始链接获取完整内容

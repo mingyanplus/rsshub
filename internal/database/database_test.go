@@ -23,7 +23,7 @@ func TestInitializeDatabase(t *testing.T) {
 	defer db.Close()
 
 	// 验证表是否创建
-	tables := []string{"feeds", "articles", "categories", "tags", "article_tags", "follow_rules", "reports", "notifications"}
+	tables := []string{"feeds", "articles", "categories", "tags", "article_tags", "follow_rules", "reports", "notifications", "read_logs", "exposures", "interest_clusters"}
 	for _, table := range tables {
 		var exists int
 		err := db.db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&exists)
@@ -284,5 +284,72 @@ func TestArticleTagRelation(t *testing.T) {
 	}
 	if tags[0].Name != "tech" {
 		t.Errorf("GetArticleTags()[0].Name = %v, want tech", tags[0].Name)
+	}
+}
+
+func TestBehaviorLogging(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "rss_test*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Close()
+
+	db, err := New(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer db.Close()
+
+	// 建 Feed 和文章作为外键目标
+	feed := &models.Feed{Title: "Test", URL: "https://test.com", IsActive: true}
+	feedID, _ := db.CreateFeed(feed)
+	res, err := db.Exec(`INSERT INTO articles (feed_id, title, link, content, fetched_at) VALUES (?, 't', 'https://example.com/a', 'c', CURRENT_TIMESTAMP)`, feedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	articleID, _ := res.LastInsertId()
+
+	// 阅读行为日志
+	if err := db.InsertReadLog(articleID, "read_complete", 0.95, 120000); err != nil {
+		t.Fatalf("InsertReadLog() error = %v", err)
+	}
+	var action string
+	var progress float64
+	if err := db.db.QueryRow(`SELECT action, progress FROM read_logs WHERE article_id = ?`, articleID).Scan(&action, &progress); err != nil {
+		t.Fatalf("查询 read_logs 失败: %v", err)
+	}
+	if action != "read_complete" || progress != 0.95 {
+		t.Errorf("read_logs 记录 = (%v, %v), want (read_complete, 0.95)", action, progress)
+	}
+
+	// 曝光批量写入 + 点击标记
+	if err := db.InsertExposures([]ExposureRecord{{ArticleID: articleID, Position: 3, Channel: "freshness"}}); err != nil {
+		t.Fatalf("InsertExposures() error = %v", err)
+	}
+	if err := db.MarkExposureClicked(articleID); err != nil {
+		t.Fatalf("MarkExposureClicked() error = %v", err)
+	}
+	var clicked int
+	if err := db.db.QueryRow(`SELECT clicked FROM exposures WHERE article_id = ?`, articleID).Scan(&clicked); err != nil {
+		t.Fatalf("查询 exposures 失败: %v", err)
+	}
+	if clicked != 1 {
+		t.Errorf("exposures.clicked = %v, want 1", clicked)
+	}
+
+	// 收藏/不感兴趣状态
+	if err := db.SetArticleFavorite(articleID, true); err != nil {
+		t.Fatalf("SetArticleFavorite() error = %v", err)
+	}
+	if err := db.SetArticleNotInterested(articleID); err != nil {
+		t.Fatalf("SetArticleNotInterested() error = %v", err)
+	}
+	article, err := db.GetArticleByID(articleID)
+	if err != nil {
+		t.Fatalf("GetArticleByID() error = %v", err)
+	}
+	if !article.IsFavorite || !article.NotInterested {
+		t.Errorf("IsFavorite/NotInterested = (%v, %v), want (true, true)", article.IsFavorite, article.NotInterested)
 	}
 }

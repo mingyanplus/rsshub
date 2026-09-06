@@ -50,6 +50,8 @@ type Article struct {
 	TranslatedContent  string     `json:"translated_content" db:"translated_content"` // 非中文内容的中文翻译
 	IsAd               bool       `json:"is_ad" db:"is_ad"`
 	IsRead             bool       `json:"is_read" db:"is_read"`
+	IsFavorite         bool       `json:"is_favorite" db:"is_favorite"`                 // 用户收藏（推荐正反馈）
+	NotInterested      bool       `json:"not_interested" db:"not_interested"`           // 不感兴趣（推荐惩罚状态）
 	AdReason        string     `json:"ad_reason" db:"ad_reason"`
 	PublishedAt     *time.Time `json:"published_at" db:"published_at"`
 	FetchedAt       time.Time  `json:"fetched_at" db:"fetched_at"`

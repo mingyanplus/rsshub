@@ -216,6 +216,10 @@
                             <span id="preview-time" class="text-sm text-gray-400"></span>
                         </div>
                         <div class="flex items-center gap-2">
+                            <button id="favorite-btn" onclick="toggleFavorite()" title="收藏（推荐正反馈）"
+                                    class="hidden text-sm bg-gray-100 text-gray-500 px-2 py-1 rounded hover:bg-yellow-100 hover:text-yellow-700 transition cursor-pointer">☆ 收藏</button>
+                            <button id="not-interested-btn" onclick="markNotInterested()" title="不感兴趣（推荐将降低此类内容）"
+                                    class="hidden text-sm bg-gray-100 text-gray-500 px-2 py-1 rounded hover:bg-red-100 hover:text-red-600 transition cursor-pointer">✕ 不感兴趣</button>
                             <a id="preview-link" href="#" target="_blank"
                                class="text-sm text-blue-500 underline hover:text-blue-700 flex items-center gap-1">
                                 查看原文 ↗
@@ -232,7 +236,7 @@
                     </div>
                 </div>
                 <!-- 文章正文 -->
-                <div class="md:flex-1 md:overflow-y-auto p-6">
+                <div id="preview-scroll" class="md:flex-1 md:overflow-y-auto p-6">
                     <div id="translate-toggle-container" class="hidden mb-3">
                         <button id="translate-toggle" onclick="toggleTranslation()" class="text-sm bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 transition cursor-pointer">
                             查看中文翻译
@@ -268,6 +272,141 @@ async function markArticleRead(id) {
         await fetch(`/api/articles/${id}/read`, { method: 'POST' });
     } catch (e) {
         console.error('标记已读失败:', e);
+    }
+}
+
+// ========== 推荐系统 P1：阅读行为埋点（进度 + 停留时长） ==========
+let behaviorArticleId = null;   // 当前正在阅读的文章
+let behaviorOpenAt = 0;         // 打开时间戳
+let behaviorMaxProgress = 0;    // 累计最大滚动进度（只增不减）
+
+// 开始跟踪一篇文章的阅读行为
+function startBehaviorTracking(id) {
+    if (behaviorArticleId === id) return;
+    finishBehaviorTracking();
+    behaviorArticleId = id;
+    behaviorOpenAt = Date.now();
+    behaviorMaxProgress = 0;
+}
+
+// 计算当前滚动进度（优先正文滚动容器；窄屏整页滚动时按正文底部进入视口估算）
+function currentScrollProgress() {
+    const el = document.getElementById('preview-scroll');
+    if (el && el.scrollHeight > el.clientHeight + 4) {
+        return (el.scrollTop + el.clientHeight) / el.scrollHeight;
+    }
+    const body = document.getElementById('preview-body');
+    if (body) {
+        const rect = body.getBoundingClientRect();
+        if (rect.height <= window.innerHeight) return rect.bottom <= window.innerHeight ? 1 : 0;
+        return -rect.top / (rect.height - window.innerHeight);
+    }
+    return 0;
+}
+
+// 上报当前文章的阅读行为（后端按阈值判定 读完/秒退/中途退出）
+function finishBehaviorTracking() {
+    if (!behaviorArticleId) return;
+    const id = behaviorArticleId;
+    const dwellMs = Date.now() - behaviorOpenAt;
+    const progress = Math.max(behaviorMaxProgress, currentScrollProgress());
+    behaviorArticleId = null;
+    fetch(`/api/articles/${id}/behavior`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ progress, dwell_ms: dwellMs }),
+        keepalive: true,
+    }).catch(e => console.error('上报阅读行为失败:', e));
+}
+
+// 滚动进度累计（正文容器与整页两个来源都监听）
+function trackScroll() {
+    if (!behaviorArticleId) return;
+    const p = currentScrollProgress();
+    if (p > behaviorMaxProgress) behaviorMaxProgress = p;
+}
+document.getElementById('preview-scroll').addEventListener('scroll', trackScroll, { passive: true });
+window.addEventListener('scroll', trackScroll, { passive: true });
+
+// 离开页面时 sendBeacon 兜底上报
+window.addEventListener('pagehide', () => {
+    if (!behaviorArticleId) return;
+    const payload = JSON.stringify({
+        progress: Math.max(behaviorMaxProgress, currentScrollProgress()),
+        dwell_ms: Date.now() - behaviorOpenAt,
+    });
+    navigator.sendBeacon(`/api/articles/${behaviorArticleId}/behavior`, new Blob([payload], { type: 'application/json' }));
+    behaviorArticleId = null;
+});
+
+// ========== 曝光批量上报（攒 10 秒或满 100 条 flush，不进阅读请求路径） ==========
+let exposureQueue = [];
+let exposureTimer = null;
+
+function queueExposure(articleId, position) {
+    exposureQueue.push({ article_id: articleId, position: position, channel: 'freshness' });
+    if (exposureQueue.length >= 100) flushExposures(false);
+    else if (!exposureTimer) exposureTimer = setTimeout(() => flushExposures(false), 10000);
+}
+
+function flushExposures(useBeacon) {
+    clearTimeout(exposureTimer);
+    exposureTimer = null;
+    if (exposureQueue.length === 0) return;
+    const items = exposureQueue;
+    exposureQueue = [];
+    const body = JSON.stringify(items);
+    if (useBeacon && navigator.sendBeacon) {
+        navigator.sendBeacon('/api/behavior/exposures', new Blob([body], { type: 'application/json' }));
+        return;
+    }
+    fetch('/api/behavior/exposures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body,
+        keepalive: true,
+    }).catch(e => {
+        console.error('曝光上报失败:', e);
+        exposureQueue = items.concat(exposureQueue);
+    });
+}
+window.addEventListener('pagehide', () => flushExposures(true));
+
+// ========== 收藏 / 不感兴趣 ==========
+async function toggleFavorite() {
+    if (!selectedArticleId) return;
+    try {
+        const res = await fetch(`/api/articles/${selectedArticleId}/favorite`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) renderFavoriteBtn(data.is_favorite);
+    } catch (e) {
+        console.error('切换收藏失败:', e);
+    }
+}
+
+function renderFavoriteBtn(favorite) {
+    const btn = document.getElementById('favorite-btn');
+    if (favorite) {
+        btn.textContent = '★ 已收藏';
+        btn.className = 'text-sm bg-yellow-100 text-yellow-700 px-2 py-1 rounded hover:bg-yellow-200 transition cursor-pointer';
+    } else {
+        btn.textContent = '☆ 收藏';
+        btn.className = 'text-sm bg-gray-100 text-gray-500 px-2 py-1 rounded hover:bg-yellow-100 hover:text-yellow-700 transition cursor-pointer';
+    }
+}
+
+async function markNotInterested() {
+    if (!selectedArticleId) return;
+    try {
+        await fetch(`/api/articles/${selectedArticleId}/not-interested`, { method: 'POST' });
+        // 从列表移除卡片，预览回到空状态
+        const card = document.querySelector(`[data-article-id="${selectedArticleId}"]`);
+        if (card) card.remove();
+        document.getElementById('preview-content').classList.add('hidden');
+        document.getElementById('preview-empty').classList.remove('hidden');
+        selectedArticleId = null;
+    } catch (e) {
+        console.error('标记不感兴趣失败:', e);
     }
 }
 
@@ -348,9 +487,10 @@ async function loadArticles(append = false) {
         }
 
         const grid = document.getElementById('articles-grid');
-        articles.forEach(article => {
+        articles.forEach((article, idx) => {
             const card = createArticleCard(article);
             grid.insertAdjacentHTML('beforeend', card);
+            queueExposure(article.id, currentOffset + idx);
         });
 
         currentOffset += articles.length;
@@ -450,14 +590,20 @@ async function loadArticlePreview(id) {
         document.getElementById('preview-empty').classList.add('hidden');
         document.getElementById('preview-content').classList.remove('hidden');
 
-        // 标记为已读（后端持久化）
+        // 标记为已读（后端持久化），并开始跟踪本次阅读行为
         markArticleRead(id);
+        startBehaviorTracking(id);
 
         // 填充内容
         document.getElementById('preview-title').textContent = article.title || '无标题';
         document.getElementById('preview-source').textContent = article.feed_title || '未知来源';
         document.getElementById('preview-time').textContent = article.published_at || '';
         document.getElementById('preview-link').href = article.link || '#';
+
+        // 收藏/不感兴趣按钮初始化
+        document.getElementById('favorite-btn').classList.remove('hidden');
+        document.getElementById('not-interested-btn').classList.remove('hidden');
+        renderFavoriteBtn(article.is_favorite);
 
         // 翻译切换
         const translateContainer = document.getElementById('translate-toggle-container');

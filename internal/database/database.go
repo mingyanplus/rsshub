@@ -371,5 +371,48 @@ CREATE TABLE IF NOT EXISTS report_articles (
 	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_topic_articles_topic ON topic_articles(topic_id)`)
 	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_topic_articles_article ON topic_articles(article_id)`)
 
+	// ========== 推荐系统 P1：行为数据层 ==========
+	// 阅读行为日志（读完/秒退/收藏/不感兴趣等原始信号，unix 时间戳）
+	d.db.Exec(`CREATE TABLE IF NOT EXISTS read_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		article_id INTEGER NOT NULL,
+		action TEXT NOT NULL,
+		progress REAL DEFAULT 0,
+		dwell_ms INTEGER DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
+	)`)
+	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_read_logs_article ON read_logs(article_id)`)
+	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_read_logs_time ON read_logs(created_at)`)
+
+	// 曝光记录（推荐列表展示即曝光，用于点击率与冷却判定）
+	d.db.Exec(`CREATE TABLE IF NOT EXISTS exposures (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		article_id INTEGER NOT NULL,
+		position INTEGER DEFAULT 0,
+		channel TEXT DEFAULT '',
+		clicked INTEGER DEFAULT 0,
+		exposed_at INTEGER NOT NULL,
+		FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
+	)`)
+	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_exposures_article ON exposures(article_id)`)
+	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_exposures_time ON exposures(exposed_at)`)
+
+	// 兴趣簇（P2 使用，先建表）
+	d.db.Exec(`CREATE TABLE IF NOT EXISTS interest_clusters (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		polarity TEXT NOT NULL,
+		centroid BLOB NOT NULL,
+		weight REAL NOT NULL DEFAULT 1,
+		sample_count INTEGER NOT NULL DEFAULT 1,
+		last_active_at INTEGER NOT NULL,
+		label TEXT DEFAULT '',
+		created_at INTEGER NOT NULL
+	)`)
+
+	// 文章收藏与不感兴趣标记（推荐状态分/惩罚项的持久状态）
+	d.db.Exec(`ALTER TABLE articles ADD COLUMN is_favorite BOOLEAN DEFAULT FALSE`)
+	d.db.Exec(`ALTER TABLE articles ADD COLUMN not_interested BOOLEAN DEFAULT FALSE`)
+
 	return nil
 }

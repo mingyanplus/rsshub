@@ -140,11 +140,12 @@ func (d *DB) GetArticleByID(id int64) (*models.Article, error) {
 	article := &models.Article{}
 	var contentCleaned, summary, aiSummary, keywords, tagsCache, adReason, entities sql.NullString
 	err := d.db.QueryRow(`
-		SELECT id, feed_id, category_id, title, link, content, content_cleaned, summary, ai_summary, keywords, tags_cache, entities, is_ad, ad_reason, published_at, fetched_at
+		SELECT id, feed_id, category_id, title, link, content, content_cleaned, summary, ai_summary, keywords, tags_cache, entities, is_ad, ad_reason, published_at, fetched_at, is_favorite, not_interested
 		FROM articles WHERE id = ?
 	`, id).Scan(&article.ID, &article.FeedID, &article.CategoryID, &article.Title, &article.Link,
 		&article.Content, &contentCleaned, &summary, &aiSummary, &keywords,
-		&tagsCache, &entities, &article.IsAd, &adReason, &article.PublishedAt, &article.FetchedAt)
+		&tagsCache, &entities, &article.IsAd, &adReason, &article.PublishedAt, &article.FetchedAt,
+		&article.IsFavorite, &article.NotInterested)
 	if err != nil {
 		return nil, err
 	}
@@ -716,6 +717,65 @@ func (d *DB) QueryArticles(params ArticleQueryParams) ([]*models.Article, error)
 // MarkArticleRead 标记文章为已读
 func (d *DB) MarkArticleRead(id int64) error {
 	_, err := d.db.Exec(`UPDATE articles SET is_read = TRUE WHERE id = ?`, id)
+	return err
+}
+
+// ExposureRecord 单条曝光记录（推荐列表展示时产生）
+type ExposureRecord struct {
+	ArticleID int64
+	Position  int
+	Channel   string // 来源通道：precise/adjacent/coverage/freshness/random
+}
+
+// InsertReadLog 写入一条阅读行为日志
+func (d *DB) InsertReadLog(articleID int64, action string, progress float64, dwellMs int64) error {
+	_, err := d.db.Exec(`
+		INSERT INTO read_logs (article_id, action, progress, dwell_ms, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, articleID, action, progress, dwellMs, time.Now().Unix())
+	return err
+}
+
+// InsertExposures 批量写入曝光记录（前端攒批后一次 flush）
+func (d *DB) InsertExposures(items []ExposureRecord) error {
+	if len(items) == 0 {
+		return nil
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO exposures (article_id, position, channel, clicked, exposed_at) VALUES (?, ?, ?, 0, ?)`)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().Unix()
+	for _, it := range items {
+		if _, err := stmt.Exec(it.ArticleID, it.Position, it.Channel, now); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// MarkExposureClicked 将文章尚未标记点击的曝光记为已点击（用于曝光点击率）
+func (d *DB) MarkExposureClicked(articleID int64) error {
+	_, err := d.db.Exec(`UPDATE exposures SET clicked = 1 WHERE article_id = ? AND clicked = 0`, articleID)
+	return err
+}
+
+// SetArticleFavorite 设置收藏状态
+func (d *DB) SetArticleFavorite(id int64, favorite bool) error {
+	_, err := d.db.Exec(`UPDATE articles SET is_favorite = ? WHERE id = ?`, favorite, id)
+	return err
+}
+
+// SetArticleNotInterested 标记文章为不感兴趣
+func (d *DB) SetArticleNotInterested(id int64) error {
+	_, err := d.db.Exec(`UPDATE articles SET not_interested = TRUE WHERE id = ?`, id)
 	return err
 }
 
