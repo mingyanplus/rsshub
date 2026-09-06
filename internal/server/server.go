@@ -249,6 +249,7 @@ type SettingsData struct {
 	ProxyURL              string
 	ProxyEnableContent    bool
 	ProxyEnableLLM        bool
+	ProtectFetchOriginal  bool
 	ServerPassword        string
 	PromptAnalyzeSystem   string
 	PromptTranslateSystem string
@@ -2410,6 +2411,23 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 获取原文保护：抓取结果比现有正文短很多时视为疑似失败（错误页/验证页/部分渲染），不覆盖
+	// 默认开启；可在设置页关闭（feeds.protect_fetch_original）
+	if appConfig == nil || appConfig.Feeds.ProtectFetchOriginal {
+		current := article.ContentCleaned
+		if current == "" {
+			current = article.Content
+		}
+		if oldLen, newLen := len(stripHTMLSimple(current)), len(stripHTMLSimple(art.Content)); oldLen > 0 && newLen < oldLen/2 {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("抓取到的正文（%d 字）明显短于现有内容（%d 字），疑似获取失败，已保留原内容", newLen, oldLen),
+			})
+			return
+		}
+	}
+
 	// 保存到 content 字段
 	if err := appDB.UpdateArticleContent(id, art.Content); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -3002,6 +3020,9 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 		appConfig.Proxy.EnableContent = r.FormValue("proxy_enable_content") == "on"
 		appConfig.Proxy.EnableLLM = r.FormValue("proxy_enable_llm") == "on"
 		applyProxyConfig()
+
+		// 获取原文保护
+		appConfig.Feeds.ProtectFetchOriginal = r.FormValue("protect_fetch_original") == "on"
 
 		// 定时任务
 		appConfig.Scheduler.MorningReportTime = r.FormValue("morning_report_time")
@@ -4088,6 +4109,7 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings.ProxyURL = appConfig.Proxy.URL
 		settings.ProxyEnableContent = appConfig.Proxy.EnableContent
 		settings.ProxyEnableLLM = appConfig.Proxy.EnableLLM
+		settings.ProtectFetchOriginal = appConfig.Feeds.ProtectFetchOriginal
 		// 登录密码
 		settings.ServerPassword = appConfig.Server.Password
 		// 提示词（显示当前生效值：自定义优先，否则内置默认）

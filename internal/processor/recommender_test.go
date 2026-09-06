@@ -145,7 +145,7 @@ func TestScoreComponents(t *testing.T) {
 		t.Errorf("不感兴趣惩罚应接近 -4, got %v", v)
 	}
 	// 理由文案
-	if s := buildReason(0, "", false, 0.5); s == "" {
+	if s := buildReason(0, "", false); s == "" {
 		t.Error("理由不应为空")
 	}
 	_ = models.Article{}

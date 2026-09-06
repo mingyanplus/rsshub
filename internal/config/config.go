@@ -127,10 +127,11 @@ type RateLimitConfig struct {
 
 // FeedsConfig RSS 订阅配置
 type FeedsConfig struct {
-	DefaultInterval time.Duration `mapstructure:"default_interval"`
-	MaxConcurrent   int           `mapstructure:"max_concurrent"`
-	Timeout         time.Duration `mapstructure:"timeout"`
-	FetchUserAgent  string        `mapstructure:"fetch_user_agent"` // 获取原文时的 User-Agent
+	DefaultInterval      time.Duration `mapstructure:"default_interval"`
+	MaxConcurrent        int           `mapstructure:"max_concurrent"`
+	Timeout              time.Duration `mapstructure:"timeout"`
+	FetchUserAgent       string        `mapstructure:"fetch_user_agent"`              // 获取原文时的 User-Agent
+	ProtectFetchOriginal bool          `mapstructure:"protect_fetch_original"`       // 获取原文保护：抓取结果比现有内容短很多（疑似失败页）时不覆盖
 }
 
 // SchedulerConfig 定时任务配置
@@ -457,6 +458,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("feeds.default_interval", cfg.Feeds.DefaultInterval)
 	v.SetDefault("feeds.max_concurrent", cfg.Feeds.MaxConcurrent)
 	v.SetDefault("feeds.timeout", cfg.Feeds.Timeout)
+	v.SetDefault("feeds.protect_fetch_original", true) // 获取原文保护默认开启
 	v.SetDefault("scheduler.morning_report_time", cfg.Scheduler.MorningReportTime)
 	v.SetDefault("scheduler.evening_report_time", cfg.Scheduler.EveningReportTime)
 	v.SetDefault("scheduler.daily_report_time", cfg.Scheduler.DailyReportTime)

@@ -180,6 +180,13 @@
                            class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                     <span class="text-sm text-gray-700">LLM / Embedding 接口走代理</span>
                 </label>
+                <label class="flex items-center gap-2.5 cursor-pointer">
+                    <input type="checkbox"
+                           name="protect_fetch_original"
+                           {{if .Settings.ProtectFetchOriginal}}checked{{end}}
+                           class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm text-gray-700">获取原文保护 <span class="text-gray-400 text-xs">（抓取结果明显短于现有正文时视为失败，不覆盖原内容）</span></span>
+                </label>
             </div>
             <p class="text-xs text-gray-400 leading-relaxed">保存后立即生效，无需重启；两个通道可独立启停。支持 http:// 与 socks5:// 协议。</p>
         </div>

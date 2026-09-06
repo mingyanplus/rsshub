@@ -166,7 +166,7 @@ func (r *Recommender) scoreFull(a *models.Article, vec []float32, posMatch float
 	s.Penalty = penaltyScore(negSim, a.NotInterested)
 
 	s.Score = clamp01(s.Interest + s.Source + s.Freshness + s.State + s.Penalty)
-	s.Reason = buildReason(posMatch, posLabel, a.IsFavorite, ageHours)
+	s.Reason = buildReason(posMatch, posLabel, a.IsFavorite)
 	return s
 }
 
@@ -188,7 +188,7 @@ func scoreFallback(a *models.Article, authority map[int64]int, feedStats map[int
 	s.Penalty = penaltyScore(0, a.NotInterested)
 
 	s.Score = clamp01(s.Freshness + s.Source + s.State + s.Penalty)
-	s.Reason = buildReason(0, "", a.IsFavorite, ageHours)
+	s.Reason = buildReason(0, "", a.IsFavorite)
 	return s
 }
 
@@ -236,34 +236,20 @@ func penaltyScore(negSim float64, notInterested bool) float64 {
 	return score
 }
 
-// buildReason 生成人话推荐理由（分数分项 → 文案）
-func buildReason(posMatch float64, posLabel string, isFavorite bool, ageHours float64) string {
-	ageText := ageText(ageHours)
+// buildReason 生成精简推荐理由徽章文案（时间信息由卡片信息行展示，不重复）
+func buildReason(posMatch float64, posLabel string, isFavorite bool) string {
 	switch {
 	case posMatch >= clusterPosMatchThreshold && posLabel != "":
-		return fmt.Sprintf("与你近期阅读的『%s』主题相近 · %s发布", posLabel, ageText)
+		return fmt.Sprintf("『%s』相关", posLabel)
 	case posMatch >= clusterPosMatchThreshold:
-		return fmt.Sprintf("与你近期阅读的兴趣相近 · %s发布", ageText)
+		return "兴趣相关"
 	case isFavorite:
-		return fmt.Sprintf("你收藏的内容 · %s发布", ageText)
+		return "已收藏"
 	default:
-		return fmt.Sprintf("%s发布的新内容", ageText)
+		return "新内容"
 	}
 }
 
-// ageText 时长文案
-func ageText(hours float64) string {
-	switch {
-	case hours < 1:
-		return "刚刚"
-	case hours < 24:
-		return fmt.Sprintf("%.0f 小时前", hours)
-	case hours < 24*30:
-		return fmt.Sprintf("%.0f 天前", hours/24)
-	default:
-		return "较早"
-	}
-}
 
 // articleAgeHours 文章年龄（小时），优先发布时间其次抓取时间
 func articleAgeHours(a *models.Article, now time.Time) float64 {

@@ -535,7 +535,7 @@ function createArticleCard(article) {
     const time = article.published_at || '';
     const readClass = article.is_read ? 'read' : '';
     const reasonBadge = article.reason
-        ? `<div class="mt-1"><span class="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5 inline-block">✨ ${escapeHtml(article.reason)}</span></div>`
+        ? `<span class="text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">✨ ${escapeHtml(article.reason)}</span>`
         : '';
 
     return `
@@ -545,19 +545,20 @@ function createArticleCard(article) {
         <div class="card-content p-3">
             <h2 class="text-sm font-semibold text-gray-900 mb-1.5 line-clamp-2">${adBadge}${failBadge} ${escapeHtml(article.title)}</h2>
             <p class="text-gray-500 text-xs line-clamp-3 mb-2">${escapeHtml(summary)}</p>
-            ${reasonBadge}
-            <div class="flex items-center gap-2 text-xs text-gray-400">
+            <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
                 <span>📰 ${article.feed_title}</span>
                 <span>📅 ${time}</span>
+                ${reasonBadge}
             </div>
         </div>
         <!-- 悬停浮动层 - 显示完整内容 -->
         <div class="hover-expand">
             <h2 class="text-sm font-semibold text-gray-900 mb-1.5">${adBadge}${failBadge} ${escapeHtml(article.title)}</h2>
             <p class="text-gray-500 text-xs mb-2">${escapeHtml(summary)}</p>
-            <div class="flex items-center gap-2 text-xs text-gray-400">
+            <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
                 <span>📰 ${article.feed_title}</span>
                 <span>📅 ${time}</span>
+                ${reasonBadge}
             </div>
         </div>
     </article>`;
