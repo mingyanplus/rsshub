@@ -158,20 +158,20 @@ func formatTimePtrInTimezone(t *time.Time) string {
 
 // PageData 页面数据
 type PageData struct {
-	Title          string
-	PageTitle      string
-	Active         string
-	Categories     []CategoryData
-	Tags           []TagData
-	Feeds          []FeedData
-	Articles       []ArticleData
-	Rules          []RuleData
-	Reports        []ReportData
-	Stats          StatsData
+	Title      string
+	PageTitle  string
+	Active     string
+	Categories []CategoryData
+	Tags       []TagData
+	Feeds      []FeedData
+	Articles   []ArticleData
+	Rules      []RuleData
+	Reports    []ReportData
+	Stats      StatsData
 	// 首页专用
-	RecentArticles  []ArticleData
-	HotTopicCards   []*models.Topic
-	FollowAlerts    []AlertData
+	RecentArticles []ArticleData
+	HotTopicCards  []*models.Topic
+	FollowAlerts   []AlertData
 	// 话题流（Readhub 式聚合）
 	TopicList       []*models.Topic
 	TopicDetail     *models.Topic
@@ -180,33 +180,33 @@ type PageData struct {
 	HotTopics24h    []*models.Topic
 	TopicCategories []string
 	// 分页
-	CurrentPage     int
-	TotalPages      int
-	TotalCount      int
-	PageSize        int
-	HasPrev         bool
-	HasNext         bool
-	PrevPage        int
-	NextPage        int
+	CurrentPage int
+	TotalPages  int
+	TotalCount  int
+	PageSize    int
+	HasPrev     bool
+	HasNext     bool
+	PrevPage    int
+	NextPage    int
 	// 搜索和筛选
-	SearchQuery     string
-	SelectedFeed    string
+	SearchQuery      string
+	SelectedFeed     string
 	SelectedCategory string
-	HideAds         bool
-	SelectedRule    int64
-	RuleName        string
+	HideAds          bool
+	SelectedRule     int64
+	RuleName         string
 	// 报告配置
-	MorningEnabled   bool
-	MorningTime      string
-	MorningChannels  string
-	EveningEnabled   bool
-	EveningTime      string
-	EveningChannels  string
-	DailyEnabled     bool
-	DailyTime        string
-	DailyChannels    string
+	MorningEnabled  bool
+	MorningTime     string
+	MorningChannels string
+	EveningEnabled  bool
+	EveningTime     string
+	EveningChannels string
+	DailyEnabled    bool
+	DailyTime       string
+	DailyChannels   string
 	// 设置
-	Settings         SettingsData
+	Settings SettingsData
 }
 
 type AlertData struct {
@@ -217,40 +217,40 @@ type AlertData struct {
 }
 
 type SettingsData struct {
-	LLMBaseURL           string
-	LLMAPIKey            string
-	LLMModel             string
-	LLMFallbackBaseURL   string
-	LLMFallbackAPIKey    string
-	LLMFallbackModel     string
-	EmbeddingBaseURL     string
-	EmbeddingAPIKey      string
-	EmbeddingModel       string
-	SMTPHost             string
-	SMTPPort             int
-	SMTPUsername         string
-	SMTPPassword         string
-	GotifyURL            string
-	GotifyToken          string
-	WebhookURL           string
-	QQBotAppID           string
-	QQBotAppSecret       string
-	QQBotUserID          string
-	MorningReportTime    string
-	EveningReportTime    string
-	DailyReportTime      string
-	RefreshInterval      int
-	AutoSummary          bool
-	AdDetection          bool
-	AutoTagging          bool
-	Embedding            bool
-	MorningReportEnabled bool
-	EveningReportEnabled bool
-	ProxyURL             string
-	ProxyEnableContent   bool
-	ProxyEnableLLM       bool
-	ServerPassword       string
-	PromptAnalyzeSystem  string
+	LLMBaseURL            string
+	LLMAPIKey             string
+	LLMModel              string
+	LLMFallbackBaseURL    string
+	LLMFallbackAPIKey     string
+	LLMFallbackModel      string
+	EmbeddingBaseURL      string
+	EmbeddingAPIKey       string
+	EmbeddingModel        string
+	SMTPHost              string
+	SMTPPort              int
+	SMTPUsername          string
+	SMTPPassword          string
+	GotifyURL             string
+	GotifyToken           string
+	WebhookURL            string
+	QQBotAppID            string
+	QQBotAppSecret        string
+	QQBotUserID           string
+	MorningReportTime     string
+	EveningReportTime     string
+	DailyReportTime       string
+	RefreshInterval       int
+	AutoSummary           bool
+	AdDetection           bool
+	AutoTagging           bool
+	Embedding             bool
+	MorningReportEnabled  bool
+	EveningReportEnabled  bool
+	ProxyURL              string
+	ProxyEnableContent    bool
+	ProxyEnableLLM        bool
+	ServerPassword        string
+	PromptAnalyzeSystem   string
 	PromptTranslateSystem string
 }
 
@@ -618,7 +618,7 @@ func CreateFeed(w http.ResponseWriter, r *http.Request) {
 			IsActive:      req.IsActive,
 			SourceType:    req.SourceType,
 			SourceConfig:  req.SourceConfig,
-		ContentFilter: req.ContentFilter,
+			ContentFilter: req.ContentFilter,
 		}
 		id, err := appDB.CreateFeed(feed)
 		if err != nil {
@@ -694,13 +694,13 @@ func UpdateFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	feed := &models.Feed{
-		ID:           id,
-		Title:        req.Title,
-		URL:          req.URL,
-		Description:  req.Description,
-		CategoryID:   req.CategoryID,
+		ID:            id,
+		Title:         req.Title,
+		URL:           req.URL,
+		Description:   req.Description,
+		CategoryID:    req.CategoryID,
 		FetchInterval: req.FetchInterval,
-		IsActive:     req.IsActive,
+		IsActive:      req.IsActive,
 		SourceType:    req.SourceType,
 		SourceConfig:  req.SourceConfig,
 		ContentFilter: req.ContentFilter,
@@ -806,8 +806,8 @@ func RefreshFeed(w http.ResponseWriter, r *http.Request) {
 			content := item.Content
 			if content == "" {
 				content = item.Description
-			// Apply per-feed content filter rules
-			content = crawler.ApplyContentFilter(content, feed.ContentFilter)
+				// Apply per-feed content filter rules
+				content = crawler.ApplyContentFilter(content, feed.ContentFilter)
 			}
 
 			// 解析发布时间 - 优先使用 gofeed 已解析的时间
@@ -1041,16 +1041,16 @@ func analyzeArticleAsync(articleID int64, title, content, description string) {
 	}
 
 	if err := appDB.UpdateArticleAI(&models.AIUpdateParams{
-		ID:              articleID,
-		AISummary:       result.Summary,
-		OneLineSummary:  result.OneLineSummary,
-		Keywords:        keywords,
-		TagsCache:       tagsCache,
-		IsAd:            result.IsAd,
-		AdReason:        result.AdReason,
-		ImportanceScore: result.ImportanceScore,
-		TopicCategory:   result.TopicCategory,
-		Entities:        entities,
+		ID:                articleID,
+		AISummary:         result.Summary,
+		OneLineSummary:    result.OneLineSummary,
+		Keywords:          keywords,
+		TagsCache:         tagsCache,
+		IsAd:              result.IsAd,
+		AdReason:          result.AdReason,
+		ImportanceScore:   result.ImportanceScore,
+		TopicCategory:     result.TopicCategory,
+		Entities:          entities,
 		TranslatedContent: result.TranslatedContent,
 	}); err != nil {
 		fmt.Printf("Failed to update article AI data %d: %v\n", articleID, err)
@@ -1504,16 +1504,16 @@ func ProcessPendingArticles(w http.ResponseWriter, r *http.Request) {
 			entities := strings.Join(result.Entities, ",")
 
 			if err := appDB.UpdateArticleAI(&models.AIUpdateParams{
-				ID:              article.ID,
-				AISummary:       result.Summary,
-				OneLineSummary:  result.OneLineSummary,
-				Keywords:        keywords,
-				TagsCache:       tagsCache,
-				IsAd:            result.IsAd,
-				AdReason:        result.AdReason,
-				ImportanceScore: result.ImportanceScore,
-				TopicCategory:   result.TopicCategory,
-				Entities:        entities,
+				ID:                article.ID,
+				AISummary:         result.Summary,
+				OneLineSummary:    result.OneLineSummary,
+				Keywords:          keywords,
+				TagsCache:         tagsCache,
+				IsAd:              result.IsAd,
+				AdReason:          result.AdReason,
+				ImportanceScore:   result.ImportanceScore,
+				TopicCategory:     result.TopicCategory,
+				Entities:          entities,
 				TranslatedContent: result.TranslatedContent,
 			}); err != nil {
 				fmt.Printf("Failed to update article AI data %d: %v\n", article.ID, err)
@@ -1754,16 +1754,16 @@ func ReanalyzeArticlesForSummary(w http.ResponseWriter, r *http.Request) {
 			entities := strings.Join(result.Entities, ",")
 
 			if err := appDB.UpdateArticleAI(&models.AIUpdateParams{
-				ID:              article.ID,
-				AISummary:       result.Summary,
-				OneLineSummary:  result.OneLineSummary,
-				Keywords:        keywords,
-				TagsCache:       tagsCache,
-				IsAd:            result.IsAd,
-				AdReason:        result.AdReason,
-				ImportanceScore: result.ImportanceScore,
-				TopicCategory:   result.TopicCategory,
-				Entities:        entities,
+				ID:                article.ID,
+				AISummary:         result.Summary,
+				OneLineSummary:    result.OneLineSummary,
+				Keywords:          keywords,
+				TagsCache:         tagsCache,
+				IsAd:              result.IsAd,
+				AdReason:          result.AdReason,
+				ImportanceScore:   result.ImportanceScore,
+				TopicCategory:     result.TopicCategory,
+				Entities:          entities,
 				TranslatedContent: result.TranslatedContent,
 			}); err != nil {
 				fmt.Printf("Failed to update article AI data %d: %v\n", article.ID, err)
@@ -1794,6 +1794,50 @@ func ReanalyzeArticlesForSummary(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("开始重新分析 %d 篇文章", len(articles)),
 		"count":   len(articles),
 	})
+}
+
+// ArticleResponse 文章列表/推荐列表共用的文章 JSON 结构
+type ArticleResponse struct {
+	ID          int64  `json:"id"`
+	FeedID      int64  `json:"feed_id"`
+	FeedTitle   string `json:"feed_title"`
+	CategoryID  *int64 `json:"category_id"`
+	Title       string `json:"title"`
+	Link        string `json:"link"`
+	Summary     string `json:"summary"`
+	AISummary   string `json:"ai_summary"`
+	Keywords    string `json:"keywords"`
+	IsAd        bool   `json:"is_ad"`
+	IsRead      bool   `json:"is_read"`
+	IsFavorite  bool   `json:"is_favorite"`
+	FetchedAt   string `json:"fetched_at"`
+	PublishedAt string `json:"published_at"`
+}
+
+// articleToResponse 文章 → JSON 结构（时间字段做时区格式化与发布时间回退）
+func articleToResponse(a *models.Article, feedMap map[int64]string) ArticleResponse {
+	fetchedAt := formatTimeInTimezone(a.FetchedAt)
+	// 优先使用发布时间，没有则使用抓取时间
+	publishedAt := formatTimePtrInTimezone(a.PublishedAt)
+	if publishedAt == "" {
+		publishedAt = fetchedAt
+	}
+	return ArticleResponse{
+		ID:          a.ID,
+		FeedID:      a.FeedID,
+		FeedTitle:   feedMap[a.FeedID],
+		CategoryID:  a.CategoryID,
+		Title:       a.Title,
+		Link:        a.Link,
+		Summary:     a.Summary,
+		AISummary:   a.AISummary,
+		Keywords:    a.Keywords,
+		IsAd:        a.IsAd,
+		IsRead:      a.IsRead,
+		IsFavorite:  a.IsFavorite,
+		FetchedAt:   fetchedAt,
+		PublishedAt: publishedAt,
+	}
 }
 
 // ListArticles 列出文章 (JSON API)
@@ -1873,48 +1917,12 @@ func ListArticles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 构建返回数据，添加 feed_title
-	type ArticleResponse struct {
-		ID            int64   `json:"id"`
-		FeedID        int64   `json:"feed_id"`
-		FeedTitle     string  `json:"feed_title"`
-		CategoryID    *int64  `json:"category_id"`
-		Title         string  `json:"title"`
-		Link          string  `json:"link"`
-		Summary       string  `json:"summary"`
-		AISummary     string  `json:"ai_summary"`
-		Keywords      string  `json:"keywords"`
-		IsAd          bool    `json:"is_ad"`
-		IsRead        bool    `json:"is_read"`
-		FetchedAt     string  `json:"fetched_at"`
-		PublishedAt   string  `json:"published_at"`
-	}
-
 	var response []ArticleResponse
 	if len(articles) == 0 {
 		response = []ArticleResponse{} // 返回空数组而不是 null
 	}
 	for _, a := range articles {
-		fetchedAt := formatTimeInTimezone(a.FetchedAt)
-		// 优先使用发布时间，没有则使用抓取时间
-		publishedAt := formatTimePtrInTimezone(a.PublishedAt)
-		if publishedAt == "" {
-			publishedAt = fetchedAt
-		}
-		response = append(response, ArticleResponse{
-			ID:          a.ID,
-			FeedID:      a.FeedID,
-			FeedTitle:   feedMap[a.FeedID],
-			CategoryID:  a.CategoryID,
-			Title:       a.Title,
-			Link:        a.Link,
-			Summary:     a.Summary,
-			AISummary:   a.AISummary,
-			Keywords:    a.Keywords,
-			IsAd:        a.IsAd,
-			IsRead:      a.IsRead,
-			FetchedAt:   fetchedAt,
-			PublishedAt: publishedAt,
-		})
+		response = append(response, articleToResponse(a, feedMap))
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -1933,13 +1941,12 @@ func GetRecommendationMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to compute metrics: %v", err), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"metrics": metrics,
 		"healthy": metrics.Healthy(),
 	})
 }
+
 // ListArticlesHTML 返回文章列表 HTML 片段（用于 HTMX 筛选）
 func ListArticlesHTML(w http.ResponseWriter, r *http.Request) {
 	if appDB == nil {
@@ -1963,9 +1970,9 @@ func ListArticlesHTML(w http.ResponseWriter, r *http.Request) {
 	// 构建查询参数
 	params := database.ArticleQueryParams{
 		HideAds: hideAds,
-		Search: searchQuery,
-		Limit:  100,
-		Offset: 0,
+		Search:  searchQuery,
+		Limit:   100,
+		Offset:  0,
 	}
 
 	if feedIDStr != "" {
@@ -2076,18 +2083,18 @@ func GetArticle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"id":              article.ID,
-		"title":           article.Title,
-		"link":            article.Link,
-		"content":         article.Content,
-		"content_cleaned": article.ContentCleaned,
-		"summary":         article.Summary,
-		"ai_summary":      article.AISummary,
-		"keywords":        article.Keywords,
-		"feed_title":      feedTitle,
-		"published_at":    publishedAt,
-		"is_ad":           article.IsAd,
-		"ad_reason":         article.AdReason,
+		"id":                 article.ID,
+		"title":              article.Title,
+		"link":               article.Link,
+		"content":            article.Content,
+		"content_cleaned":    article.ContentCleaned,
+		"summary":            article.Summary,
+		"ai_summary":         article.AISummary,
+		"keywords":           article.Keywords,
+		"feed_title":         feedTitle,
+		"published_at":       publishedAt,
+		"is_ad":              article.IsAd,
+		"ad_reason":          article.AdReason,
 		"translated_content": article.TranslatedContent,
 		"is_favorite":        article.IsFavorite,
 		"not_interested":     article.NotInterested,
@@ -2118,8 +2125,8 @@ func MarkArticleRead(w http.ResponseWriter, r *http.Request) {
 
 // BehaviorReportRequest 前端上报的阅读行为（原始信号，服务端负责分类）
 type BehaviorReportRequest struct {
-	Progress float64 `json:"progress"`  // 滚动进度 0~1
-	DwellMs  int64   `json:"dwell_ms"`  // 停留时长毫秒
+	Progress float64 `json:"progress"` // 滚动进度 0~1
+	DwellMs  int64   `json:"dwell_ms"` // 停留时长毫秒
 }
 
 // classifyReadAction 按行为阈值判定信号分类（推荐方案 §2.4）
@@ -2136,15 +2143,24 @@ func classifyReadAction(progress float64, dwellMs int64) string {
 	return "open"
 }
 
+// articleIDFromRequest 解析 URL 路径中的文章 ID（非法时已写 400 响应，返回 false）
+func articleIDFromRequest(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid article ID", http.StatusBadRequest)
+		return 0, false
+	}
+	return id, true
+}
+
 // ReportArticleBehavior 上报阅读行为（切换/关闭文章预览时触发），写日志并标记曝光点击
 func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
 	if appDB == nil {
 		http.Error(w, "Database not initialized", http.StatusInternalServerError)
 		return
 	}
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid article ID", http.StatusBadRequest)
+	id, ok := articleIDFromRequest(w, r)
+	if !ok {
 		return
 	}
 	var req BehaviorReportRequest
@@ -2153,11 +2169,7 @@ func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 夹紧进度到 [0, 1]
-	if req.Progress < 0 {
-		req.Progress = 0
-	} else if req.Progress > 1 {
-		req.Progress = 1
-	}
+	req.Progress = min(1, max(0, req.Progress))
 	action := classifyReadAction(req.Progress, req.DwellMs)
 	if err := appDB.InsertReadLog(id, action, req.Progress, req.DwellMs); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to insert read log: %v", err), http.StatusInternalServerError)
@@ -2165,10 +2177,10 @@ func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
 	}
 	// 打开过预览即视为对曝光的点击（失败不影响主流程）
 	appDB.MarkExposureClicked(id)
-	// 通道权重自适应：被点击的文章所属通道权重 ×1.1（异步，方案 §7.2）
+	// 通道权重自适应：被点击的文章所属通道权重 ×增益（异步，方案 §7.2）
 	if appInterestProfile != nil {
 		if ch, err := appDB.LatestExposureChannel(id); err == nil && ch != "" {
-			go processor.NewRecommender(appDB, appInterestProfile).AdjustChannelWeight(ch, 1.1)
+			go processor.NewRecommender(appDB, appInterestProfile).AdjustChannelWeight(ch, processor.ChannelClickFactor)
 		}
 	}
 	// 反馈闭环：读完入正簇、秒退入负簇（方案 §7.1）
@@ -2178,8 +2190,7 @@ func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
 	case "quick_bounce":
 		recordFeedback(id, "negative", 1)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "action": action})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "action": action})
 }
 
 // ToggleArticleFavorite 收藏/取消收藏（写行为日志 + 持久化状态）
@@ -2188,9 +2199,8 @@ func ToggleArticleFavorite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database not initialized", http.StatusInternalServerError)
 		return
 	}
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid article ID", http.StatusBadRequest)
+	id, ok := articleIDFromRequest(w, r)
+	if !ok {
 		return
 	}
 	article, err := appDB.GetArticleByID(id)
@@ -2214,8 +2224,7 @@ func ToggleArticleFavorite(w http.ResponseWriter, r *http.Request) {
 	if favorite {
 		recordFeedback(id, "positive", 2)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "is_favorite": favorite})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "is_favorite": favorite})
 }
 
 // MarkArticleNotInterested 标记文章为不感兴趣（推荐强负反馈）
@@ -2224,9 +2233,8 @@ func MarkArticleNotInterested(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database not initialized", http.StatusInternalServerError)
 		return
 	}
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid article ID", http.StatusBadRequest)
+	id, ok := articleIDFromRequest(w, r)
+	if !ok {
 		return
 	}
 	if err := appDB.SetArticleNotInterested(id); err != nil {
@@ -2238,8 +2246,7 @@ func MarkArticleNotInterested(w http.ResponseWriter, r *http.Request) {
 	}
 	// 不感兴趣为强负反馈
 	recordFeedback(id, "negative", 2)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // ExposureReportItem 前端攒批上报的单条曝光
@@ -2275,8 +2282,7 @@ func ReportExposures(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to insert exposures: %v", err), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "count": len(records)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "count": len(records)})
 }
 
 // GetRecommendations 推荐列表：多因子打分排序 + 分项分数与推荐理由
@@ -2294,16 +2300,9 @@ func GetRecommendations(w http.ResponseWriter, r *http.Request) {
 	}
 	mode := r.URL.Query().Get("mode") // curated（默认精选）/ discover（拓展发现）
 
+	// 单一入口：两种模式统一走 RecommendMode（ChannelMixFor 对未知模式回落精选配比）
 	recommender := processor.NewRecommender(appDB, appInterestProfile)
-	var (
-		scored []*processor.ScoredArticle
-		err    error
-	)
-	if mode == "discover" {
-		scored, err = recommender.RecommendMode("discover", limit)
-	} else {
-		scored, err = recommender.Recommend(limit)
-	}
+	scored, err := recommender.RecommendMode(mode, limit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to recommend: %v", err), http.StatusInternalServerError)
 		return
@@ -2315,63 +2314,35 @@ func GetRecommendations(w http.ResponseWriter, r *http.Request) {
 		feedMap[f.ID] = f.Title
 	}
 
+	// RecResponse 嵌入共享文章结构，追加推荐分数分项
 	type RecResponse struct {
-		ID          int64   `json:"id"`
-		FeedID      int64   `json:"feed_id"`
-		FeedTitle   string  `json:"feed_title"`
-		Title       string  `json:"title"`
-		Link        string  `json:"link"`
-		Summary     string  `json:"summary"`
-		AISummary   string  `json:"ai_summary"`
-		Keywords    string  `json:"keywords"`
-		IsAd        bool    `json:"is_ad"`
-		IsRead      bool    `json:"is_read"`
-		IsFavorite  bool    `json:"is_favorite"`
-		PublishedAt string  `json:"published_at"`
-		Score       float64 `json:"score"`
-		Interest    float64 `json:"interest"`
-		Source      float64 `json:"source"`
-		Freshness   float64 `json:"freshness"`
-		State       float64 `json:"state"`
-		Penalty     float64 `json:"penalty"`
-		Reason      string  `json:"reason"`
-		Channel     string  `json:"channel"`
+		ArticleResponse
+		Score     float64 `json:"score"`
+		Interest  float64 `json:"interest"`
+		Source    float64 `json:"source"`
+		Freshness float64 `json:"freshness"`
+		State     float64 `json:"state"`
+		Penalty   float64 `json:"penalty"`
+		Reason    string  `json:"reason"`
+		Channel   string  `json:"channel"`
 	}
 
 	response := make([]RecResponse, 0, len(scored))
 	for _, s := range scored {
-		a := s.Article
-		publishedAt := formatTimePtrInTimezone(a.PublishedAt)
-		if publishedAt == "" {
-			publishedAt = formatTimeInTimezone(a.FetchedAt)
-		}
 		response = append(response, RecResponse{
-			ID:          a.ID,
-			FeedID:      a.FeedID,
-			FeedTitle:   feedMap[a.FeedID],
-			Title:       a.Title,
-			Link:        a.Link,
-			Summary:     a.Summary,
-			AISummary:   a.AISummary,
-			Keywords:    a.Keywords,
-			IsAd:        a.IsAd,
-			IsRead:      a.IsRead,
-			IsFavorite:  a.IsFavorite,
-			PublishedAt: publishedAt,
-			Score:       s.Score,
-			Interest:    s.Interest,
-			Source:      s.Source,
-			Freshness:   s.Freshness,
-			State:       s.State,
-			Penalty:     s.Penalty,
-			Reason:      s.Reason,
-			Channel:     s.Channel,
+			ArticleResponse: articleToResponse(s.Article, feedMap),
+			Score:           s.Score,
+			Interest:        s.Interest,
+			Source:          s.Source,
+			Freshness:       s.Freshness,
+			State:           s.State,
+			Penalty:         s.Penalty,
+			Reason:          s.Reason,
+			Channel:         s.Channel,
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, response)
 }
 
 // FetchOriginalContent 从文章原始链接获取完整内容
@@ -2982,8 +2953,6 @@ func GenerateReport(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-
-
 // SearchArticles 搜索文章
 func SearchArticles(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
@@ -3150,8 +3119,8 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 		EmbeddingModel   string `json:"embedding_model"`
 		EmbeddingAPIKey  string `json:"embedding_api_key"`
 		// Gotify
-		GotifyURL    string `json:"gotify_url"`
-		GotifyToken  string `json:"gotify_token"`
+		GotifyURL   string `json:"gotify_url"`
+		GotifyToken string `json:"gotify_token"`
 		// Email
 		SMTPHost     string `json:"smtp_host"`
 		SMTPPort     string `json:"smtp_port"`
@@ -3430,8 +3399,8 @@ func saveConfigToFile() error {
 			}
 		}
 	}
-	inLLMFallback := false    // 当前处于 llm.fallback 子段内
-	llmFallbackIndent := -1   // fallback: 行的缩进，用于判断子段结束
+	inLLMFallback := false  // 当前处于 llm.fallback 子段内
+	llmFallbackIndent := -1 // fallback: 行的缩进，用于判断子段结束
 
 	// 当前所在的配置区域
 	inLLMSection := false
@@ -3836,9 +3805,9 @@ func TopicDetailPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := PageData{
-		Title:      "话题详情",
-		PageTitle:  "话题详情",
-		Active:     "topics",
+		Title:       "话题详情",
+		PageTitle:   "话题详情",
+		Active:      "topics",
 		TopicDetail: topic,
 	}
 
@@ -3953,10 +3922,10 @@ func ConvertTopicToEvent(w http.ResponseWriter, r *http.Request) {
 // FeedsPage 订阅管理页
 func FeedsPage(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:     "订阅管理",
-		PageTitle: "订阅管理",
-		Active:    "feeds",
-		Feeds:     []FeedData{},
+		Title:      "订阅管理",
+		PageTitle:  "订阅管理",
+		Active:     "feeds",
+		Feeds:      []FeedData{},
 		Categories: []CategoryData{},
 	}
 
@@ -4144,9 +4113,9 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 // CategoriesPage 分类管理页
 func CategoriesPage(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:     "分类管理",
-		PageTitle: "分类管理",
-		Active:    "categories",
+		Title:      "分类管理",
+		PageTitle:  "分类管理",
+		Active:     "categories",
 		Categories: []CategoryData{},
 	}
 
@@ -4486,16 +4455,16 @@ func ListFollowedArticles(w http.ResponseWriter, r *http.Request) {
 				isRead = readVal
 
 				matchedArticles = append(matchedArticles, map[string]interface{}{
-					"id":                article.ID,
-					"title":             article.Title,
-					"link":              article.Link,
-					"summary":           article.Summary,
-					"ai_summary":        article.AISummary,
-					"feed_name":         feedName,
-					"keywords":          article.Keywords,
-					"matched_rule_name": rule.Name,
-					"published_at":      publishedAt,
-					"is_read":           isRead,
+					"id":                 article.ID,
+					"title":              article.Title,
+					"link":               article.Link,
+					"summary":            article.Summary,
+					"ai_summary":         article.AISummary,
+					"feed_name":          feedName,
+					"keywords":           article.Keywords,
+					"matched_rule_name":  rule.Name,
+					"published_at":       publishedAt,
+					"is_read":            isRead,
 					"translated_content": article.TranslatedContent,
 				})
 				break // 一篇文章只匹配一个规则
@@ -4725,10 +4694,10 @@ func GetCategory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":          category.ID,
-		"name":        category.Name,
-		"description": category.Description,
-		"icon":        category.Color, // 前端使用 icon，数据库存储为 color
+		"id":           category.ID,
+		"name":         category.Name,
+		"description":  category.Description,
+		"icon":         category.Color, // 前端使用 icon，数据库存储为 color
 		"content_type": category.ContentType,
 	})
 }
@@ -4953,12 +4922,12 @@ func CreateRule(w http.ResponseWriter, r *http.Request) {
 	// 保存到数据库
 	if appDB != nil {
 		rule := &models.FollowRule{
-			Name:              req.Name,
-			Description:       req.Description,
-			Keywords:          req.Keywords,
+			Name:                req.Name,
+			Description:         req.Description,
+			Keywords:            req.Keywords,
 			SimilarityThreshold: req.SimilarityThreshold,
-			IsActive:          true,
-			EnablePush:        req.EnablePush,
+			IsActive:            true,
+			EnablePush:          req.EnablePush,
 		}
 		id, err := appDB.CreateFollowRule(rule)
 		if err != nil {
@@ -5461,9 +5430,9 @@ func ImportData(w http.ResponseWriter, r *http.Request) {
 // importJSON 导入 JSON 格式数据
 func importJSON(w http.ResponseWriter, r *http.Request, file io.Reader) {
 	var data struct {
-		Version    string            `json:"version"`
-		Feeds      []*models.Feed    `json:"feeds"`
-		Categories []*models.Category `json:"categories"`
+		Version    string               `json:"version"`
+		Feeds      []*models.Feed       `json:"feeds"`
+		Categories []*models.Category   `json:"categories"`
 		Rules      []*models.FollowRule `json:"rules"`
 	}
 
@@ -5866,8 +5835,8 @@ func RefreshFeedInternal(feedID int64) error {
 			content := item.Content
 			if content == "" {
 				content = item.Description
-			// Apply per-feed content filter rules
-			content = crawler.ApplyContentFilter(content, feed.ContentFilter)
+				// Apply per-feed content filter rules
+				content = crawler.ApplyContentFilter(content, feed.ContentFilter)
 			}
 
 			// 解析发布时间 - 优先使用 gofeed 已解析的时间
@@ -6029,16 +5998,16 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 		entities := strings.Join(result.Entities, ",")
 
 		if err := appDB.UpdateArticleAI(&models.AIUpdateParams{
-			ID:              article.ID,
-			AISummary:       result.Summary,
-			OneLineSummary:  result.OneLineSummary,
-			Keywords:        keywords,
-			TagsCache:       tagsCache,
-			IsAd:            result.IsAd,
-			AdReason:        result.AdReason,
-			ImportanceScore: result.ImportanceScore,
-			TopicCategory:   result.TopicCategory,
-			Entities:        entities,
+			ID:                article.ID,
+			AISummary:         result.Summary,
+			OneLineSummary:    result.OneLineSummary,
+			Keywords:          keywords,
+			TagsCache:         tagsCache,
+			IsAd:              result.IsAd,
+			AdReason:          result.AdReason,
+			ImportanceScore:   result.ImportanceScore,
+			TopicCategory:     result.TopicCategory,
+			Entities:          entities,
 			TranslatedContent: result.TranslatedContent,
 		}); err != nil {
 			fmt.Printf("Failed to update incomplete article AI data %d: %v\n", article.ID, err)
@@ -6762,9 +6731,9 @@ func MatchSingleEventArticles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message":  fmt.Sprintf("开始为事件 '%s' 匹配文章", event.Name),
-		"event_id": eventID,
+		"success":   true,
+		"message":   fmt.Sprintf("开始为事件 '%s' 匹配文章", event.Name),
+		"event_id":  eventID,
 		"clear_old": clearOld,
 	})
 }
@@ -6998,10 +6967,10 @@ func MatchArticlesToEvents(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":  true,
-		"matched":  matchedCount,
-		"events":   len(events),
-		"message":  fmt.Sprintf("已匹配 %d 篇文章到 %d 个事件", matchedCount, len(events)),
+		"success": true,
+		"matched": matchedCount,
+		"events":  len(events),
+		"message": fmt.Sprintf("已匹配 %d 篇文章到 %d 个事件", matchedCount, len(events)),
 	})
 }
 
@@ -7103,18 +7072,18 @@ func OptimizeEventDescription(w http.ResponseWriter, r *http.Request) {
 
 	// 解析 LLM 返回的 JSON（兼容中文和英文字段名）
 	var optimized struct {
-		Title               string `json:"title"`
-		TitleCN             string `json:"优化后的标题"`
-		Description         string `json:"description"`
-		DescriptionCN       string `json:"优化后描述"`
-		Keywords            string `json:"keywords"`
-		KeywordsCN          string `json:"优化后关键词"`
-		NegativeKeywords    string `json:"negative_keywords"`
-		NegativeKeywordsCN  string `json:"负面关键词"`
-		Roles               string `json:"roles"`
-		RolesCN             string `json:"需关注的主体"`
-		MatchSuggestions    string `json:"match_suggestions"`
-		MatchSuggestionsCN  string `json:"匹配改进建议"`
+		Title              string `json:"title"`
+		TitleCN            string `json:"优化后的标题"`
+		Description        string `json:"description"`
+		DescriptionCN      string `json:"优化后描述"`
+		Keywords           string `json:"keywords"`
+		KeywordsCN         string `json:"优化后关键词"`
+		NegativeKeywords   string `json:"negative_keywords"`
+		NegativeKeywordsCN string `json:"负面关键词"`
+		Roles              string `json:"roles"`
+		RolesCN            string `json:"需关注的主体"`
+		MatchSuggestions   string `json:"match_suggestions"`
+		MatchSuggestionsCN string `json:"匹配改进建议"`
 	}
 
 	// 清理响应（去除 markdown 代码块）
@@ -7252,10 +7221,10 @@ func CheckEventMatchQuality(w http.ResponseWriter, r *http.Request) {
 	if len(articles) == 0 {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":      true,
-			"event":        event.Name,
-			"total_matches": 0,
-			"analysis":     "该事件暂无匹配文章",
+			"success":         true,
+			"event":           event.Name,
+			"total_matches":   0,
+			"analysis":        "该事件暂无匹配文章",
 			"recommendations": []string{"请添加更多相关关键词", "检查事件描述是否准确"},
 		})
 		return
@@ -7347,14 +7316,14 @@ func CheckEventMatchQuality(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":        true,
-		"event":          event.Name,
-		"total_matches":  len(articles),
+		"success":         true,
+		"event":           event.Name,
+		"total_matches":   len(articles),
 		"relevance_score": analysis.RelevanceScore,
-		"analysis":       analysis.Analysis,
-		"good_matches":   analysis.GoodMatches,
-		"bad_matches":    analysis.BadMatches,
+		"analysis":        analysis.Analysis,
+		"good_matches":    analysis.GoodMatches,
+		"bad_matches":     analysis.BadMatches,
 		"recommendations": analysis.Recommendations,
-		"raw_response":   response,
+		"raw_response":    response,
 	})
 }

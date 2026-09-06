@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -42,20 +43,11 @@ func randomUnitVec(n int) []float32 {
 		v[0] = 1
 		return v
 	}
-	s := float32(1 / sqrtF64(norm))
+	s := float32(1 / math.Sqrt(norm))
 	for i := range v {
 		v[i] *= s
 	}
 	return v
-}
-
-func sqrtF64(v float64) float64 {
-	// 简单包装避免直接 import math 于测试（保持与实现一致的 float32 单位化）
-	x := v
-	for i := 0; i < 20; i++ {
-		x = (x + v/x) / 2
-	}
-	return x
 }
 
 // TestRerankTopicQuota 主题配额：同 topic_category 最多 quotaPerTopic 篇

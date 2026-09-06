@@ -2,6 +2,8 @@ package processor
 
 import (
 	"math"
+
+	"rss-ai/internal/ai"
 )
 
 // 防茧房评估指标健康范围（方案 §8）
@@ -75,7 +77,7 @@ func (r *Recommender) ComputeMetrics() (*RecMetrics, error) {
 			total, pairs := 0.0, 0
 			for i := 0; i < len(vecs); i++ {
 				for j := i + 1; j < len(vecs); j++ {
-					total += cosineSim(vecs[i], vecs[j])
+					total += ai.CalculateCosineSimilarity(vecs[i], vecs[j])
 					pairs++
 				}
 			}

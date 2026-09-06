@@ -17,9 +17,9 @@ import (
 
 // 报告配置
 const (
-	MaxFeaturedTopics   = 5  // 重点主题数量
-	MaxBriefArticles    = 10 // 简讯数量
-	MinArticlesRequired = 5  // 最少文章数量
+	MaxFeaturedTopics   = 5               // 重点主题数量
+	MaxBriefArticles    = 10              // 简讯数量
+	MinArticlesRequired = 5               // 最少文章数量
 	LLMRequestInterval  = 2 * time.Second // LLM 请求间隔
 )
 

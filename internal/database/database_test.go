@@ -125,11 +125,11 @@ func TestArticleCRUD(t *testing.T) {
 
 	// Create Article
 	article := &models.Article{
-		FeedID:   feedID,
-		Title:    "Test Article",
-		Link:     "https://example.com/article",
-		Content:  "Full content",
-		Summary:  "Article summary",
+		FeedID:  feedID,
+		Title:   "Test Article",
+		Link:    "https://example.com/article",
+		Content: "Full content",
+		Summary: "Article summary",
 	}
 	id, err := db.CreateArticle(article)
 	if err != nil {

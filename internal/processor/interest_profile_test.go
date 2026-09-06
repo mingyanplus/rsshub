@@ -110,11 +110,9 @@ func TestInterestProfileClusterAndMerge(t *testing.T) {
 		t.Fatalf("负反馈应建负簇, got %d", len(negClusters))
 	}
 
-	// 匹配度：正交文章与正簇 posMatch 应为 0
-	posMatch, _, negSim, _ := profile.MatchScores([]float32{-0.98, 0, 0.15, 0})
-	if posMatch != 0 {
-		t.Errorf("正交向量 posMatch 应为 0, got %v", posMatch)
-	}
+	// 负簇相似度：秒退方向的文章应与负簇匹配达惩罚阈值以上
+	_, negCentroids := profile.NegativeCentroids()
+	negSim := bestSimilarity([]float32{-0.98, 0, 0.15, 0}, negCentroids)
 	if negSim < clusterNegPenaltyThreshold {
 		t.Errorf("负簇相似度应 ≥ 惩罚阈值, got %v", negSim)
 	}

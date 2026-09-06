@@ -2,8 +2,10 @@ package processor
 
 import (
 	"fmt"
+
 	"math"
 	"math/rand"
+	"rss-ai/internal/ai"
 	"sort"
 	"time"
 
@@ -27,28 +29,12 @@ const (
 	exposureCooldownDays = 7   // 曝光未点击冷却天数
 )
 
-// 推荐通道（完整五通道，方案 §4）
-const (
-	ChannelAdjacent = "adjacent" // 邻接簇
-	ChannelCoverage = "coverage" // 主题覆盖（盲区）
-	ChannelRandom   = "random"   // 随机探索
-)
-
-// defaultChannelMix 通道配比（方案附录：精选模式默认配比）
-var defaultChannelMix = map[string]float64{
-	ChannelPrecise:   0.50,
-	ChannelFreshness: 0.15,
-	ChannelAdjacent:  0.15,
-	ChannelCoverage:  0.10,
-	ChannelRandom:    0.10,
-}
-
 // isExplorationChannel 是否为探索类通道（保底统计口径）
 func isExplorationChannel(ch string) bool {
 	return ch == ChannelAdjacent || ch == ChannelCoverage || ch == ChannelRandom
 }
 
-// recallCandidate 带预计算匹配度的候选
+// recallCandidate 带预计算向量与匹配度的候选（召回排序与打分共用）
 type recallCandidate struct {
 	cand   *database.RecommendationCandidate
 	vec    []float32
@@ -56,39 +42,23 @@ type recallCandidate struct {
 	negSim float64
 }
 
-// recall 五路召回：对候选池按配比分通道抽取并标记 Channel（方案 §4）
-func (r *Recommender) recall(candidates []*database.RecommendationCandidate, limit int, mix map[string]float64) []*database.RecommendationCandidate {
-	if len(candidates) == 0 || limit <= 0 {
+// recall 五路召回：对预计算候选池按配比分通道抽取并标记 Channel（方案 §4）
+// posClusters/posCentroids 由调用方加载一次传入（邻接簇通道用）
+func (r *Recommender) recall(pool []recallCandidate, posClusters []models.InterestCluster, posCentroids [][]float32, limit int, mix map[string]float64) []recallCandidate {
+	if len(pool) == 0 || limit <= 0 {
 		return nil
 	}
-
-	// 预计算向量与正/负簇匹配（各通道排序依据，一次算完）
-	posClusters, posCentroids := r.profile.PositiveCentroids()
-	_, negCentroids := r.profile.NegativeCentroids()
 	profileReady := len(posClusters) > 0
 
-	pool := make([]recallCandidate, 0, len(candidates))
-	for _, c := range candidates {
-		e := recallCandidate{cand: c}
-		if c.HasVec {
-			e.vec = articleVector(c.Article)
-		}
-		if profileReady && len(e.vec) > 0 {
-			e.posSim = bestSimilarity(e.vec, posCentroids)
-			e.negSim = bestSimilarity(e.vec, negCentroids)
-		}
-		pool = append(pool, e)
-	}
-
 	used := make(map[int64]bool)
-	var result []*database.RecommendationCandidate
+	var result []recallCandidate
 	pick := func(e recallCandidate, ch string) {
 		if used[e.cand.Article.ID] {
 			return
 		}
 		used[e.cand.Article.ID] = true
 		e.cand.Channel = ch
-		result = append(result, e.cand)
+		result = append(result, e)
 	}
 	quota := func(ch string) int { return int(math.Round(float64(limit) * mix[ch] * recallOversample)) }
 
@@ -139,7 +109,7 @@ func (r *Recommender) recall(candidates []*database.RecommendationCandidate, lim
 	}
 
 	// 3. 主题覆盖通道：阅读占比 <2% 的类别（含从未读过的——以候选池出现的类别为准），每类抽 1~2 篇
-	dist, readTotal, _ := r.db.ListReadTopicDistribution()
+	dist, readTotal := readTopicDistribution(r.db)
 	if blind := blindCategories(pool, dist, readTotal); len(blind) > 0 {
 		n := quota(ChannelCoverage)
 		for cat := range blind {
@@ -216,7 +186,7 @@ func adjacentClusterCentroids(clusters []models.InterestCluster, centroids [][]f
 		sims := make([]pair, 0, len(clusters)-1)
 		for j := range clusters {
 			if i != j {
-				sims = append(sims, pair{j, cosineSim(centroids[i], centroids[j])})
+				sims = append(sims, pair{j, ai.CalculateCosineSimilarity(centroids[i], centroids[j])})
 			}
 		}
 		sort.SliceStable(sims, func(a, b int) bool { return sims[a].sim > sims[b].sim })
@@ -229,6 +199,21 @@ func adjacentClusterCentroids(clusters []models.InterestCluster, centroids [][]f
 		}
 	}
 	return out
+}
+
+// readTopicDistribution 已读主题分布（复用 ListTopicCategoryStats，与指标口径一致）
+func readTopicDistribution(db *database.DB) (map[string]int, int) {
+	stats, err := db.ListTopicCategoryStats()
+	if err != nil {
+		return nil, 0
+	}
+	dist := make(map[string]int, len(stats))
+	total := 0
+	for _, s := range stats {
+		dist[s.Category] = s.Read
+		total += s.Read
+	}
+	return dist, total
 }
 
 // blindCategories 盲区类别：候选池中出现的类别，其阅读占比 <2%（从未读过的类别占比为 0，天然是盲区）
@@ -254,10 +239,26 @@ func blindCategories(pool []recallCandidate, dist map[string]int, readTotal int)
 }
 
 // rerankAndFinalize MMR 多样性打散 + 主题配额 + 探索保底（方案 §6，纯内存计算）
+// 相似度用预归一化向量的点积（等价余弦，避免每对重算范数）；topicKey 预计算一次
 func rerankAndFinalize(scored []*ScoredArticle, limit int) []*ScoredArticle {
-	vecs := make([][]float32, len(scored))
+	// 预归一化向量副本与主题键（MMR 内层高频访问）
+	normed := make([][]float32, len(scored))
+	keys := make([]string, len(scored))
 	for i, s := range scored {
-		vecs[i] = articleVector(s.Article)
+		keys[i] = topicKey(s.Article)
+		if len(s.vec) > 0 {
+			normed[i] = normalizeF32(s.vec)
+		}
+	}
+	dot := func(a, b []float32) float64 {
+		if len(a) == 0 || len(b) == 0 {
+			return 0
+		}
+		sum := float64(0)
+		for i := range a {
+			sum += float64(a[i]) * float64(b[i])
+		}
+		return sum
 	}
 
 	quota := make(map[string]int)
@@ -268,16 +269,14 @@ func rerankAndFinalize(scored []*ScoredArticle, limit int) []*ScoredArticle {
 	for len(selected) < limit {
 		bestIdx, bestVal := -1, math.Inf(-1)
 		for i, s := range scored {
-			if chosen[i] || quota[topicKey(s.Article)] >= quotaPerTopic {
+			if chosen[i] || quota[keys[i]] >= quotaPerTopic {
 				continue
 			}
 			// MMR：λ×相关性 - (1-λ)×与已选文章的最大相似度
 			maxSim := 0.0
 			for _, sv := range selectedVecs {
-				if len(vecs[i]) > 0 && len(sv) > 0 {
-					if sim := cosineSim(vecs[i], sv); sim > maxSim {
-						maxSim = sim
-					}
+				if sim := dot(normed[i], sv); sim > maxSim {
+					maxSim = sim
 				}
 			}
 			if val := mmrLambda*s.Score - (1-mmrLambda)*maxSim; val > bestVal {
@@ -288,9 +287,9 @@ func rerankAndFinalize(scored []*ScoredArticle, limit int) []*ScoredArticle {
 			break // 全部被配额卡住或没有候选
 		}
 		chosen[bestIdx] = true
-		quota[topicKey(scored[bestIdx].Article)]++
+		quota[keys[bestIdx]]++
 		selected = append(selected, scored[bestIdx])
-		selectedVecs = append(selectedVecs, vecs[bestIdx])
+		selectedVecs = append(selectedVecs, normed[bestIdx])
 	}
 
 	// 探索保底：至少 explorationMin 篇来自探索通道，不足则用未入选的探索候选替换末位非探索文章
@@ -324,4 +323,21 @@ func topicKey(a *models.Article) string {
 		return "cat:" + a.TopicCategory
 	}
 	return fmt.Sprintf("feed:%d", a.FeedID)
+}
+
+// normalizeF32 L2 归一化副本（零向量返回 nil）
+func normalizeF32(v []float32) []float32 {
+	var norm float64
+	for _, x := range v {
+		norm += float64(x) * float64(x)
+	}
+	if norm == 0 {
+		return nil
+	}
+	s := float32(1 / math.Sqrt(norm))
+	out := make([]float32, len(v))
+	for i, x := range v {
+		out[i] = x * s
+	}
+	return out
 }

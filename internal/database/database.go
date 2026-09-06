@@ -324,9 +324,9 @@ CREATE TABLE IF NOT EXISTS report_articles (
 	d.db.Exec(`ALTER TABLE feeds ADD COLUMN source_type TEXT DEFAULT 'rss'`)
 	d.db.Exec(`ALTER TABLE feeds ADD COLUMN source_config TEXT DEFAULT '{}'`)
 
-		// 添加文章处理失败计数字段
-		d.db.Exec(`ALTER TABLE articles ADD COLUMN process_attempts INTEGER DEFAULT 0`)
-		d.db.Exec(`ALTER TABLE articles ADD COLUMN process_error TEXT DEFAULT ''`)
+	// 添加文章处理失败计数字段
+	d.db.Exec(`ALTER TABLE articles ADD COLUMN process_attempts INTEGER DEFAULT 0`)
+	d.db.Exec(`ALTER TABLE articles ADD COLUMN process_error TEXT DEFAULT ''`)
 
 	// 添加 feeds 表的来源权威度字段（1-5，官方博客/一线媒体权重高）
 	d.db.Exec(`ALTER TABLE feeds ADD COLUMN authority INTEGER DEFAULT 3`)

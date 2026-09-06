@@ -26,12 +26,12 @@ func newRecTestDB(t *testing.T) (*testDB, *InterestProfile) {
 	return &testDB{db, feedID}, profile
 }
 
-func seedCandidate(t *testing.T, db *testDB, title, link string, vec []float32, ageHours float64, favorite bool) int64 {
+func seedCandidate(t *testing.T, db *testDB, title, link string, vec []float32, ageHours float64) int64 {
 	t.Helper()
 	emb, _ := ai.SerializeEmbedding(vec)
 	published := time.Now().Add(-time.Duration(ageHours) * time.Hour)
-	res, err := db.Exec(`INSERT INTO articles (feed_id, title, link, content, keywords, embedding, published_at, fetched_at, is_favorite)
-		VALUES (?, ?, ?, 'c', '', ?, ?, ?, ?)`, db.feedID, title, link, emb, published, published, favorite)
+	res, err := db.Exec(`INSERT INTO articles (feed_id, title, link, content, keywords, embedding, published_at, fetched_at)
+		VALUES (?, ?, ?, 'c', '', ?, ?, ?)`, db.feedID, title, link, emb, published, published)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,9 +59,9 @@ func TestRecommenderScoring(t *testing.T) {
 	}
 
 	// 候选：兴趣匹配的新文章 vs 同样新但无关方向的文章 vs 负簇方向文章
-	interestID := seedCandidate(t, db, "Go 1.24 新特性", "https://go.dev/new", []float32{0.95, 0.3, 0, 0}, 2, false)
-	unrelatedID := seedCandidate(t, db, "园艺日记", "https://garden.com/a", []float32{0, 0.2, 0.98, 0}, 2, false)
-	adishID := seedCandidate(t, db, "限时促销", "https://ad.com/a", []float32{-0.97, 0.1, 0, 0}, 1, false)
+	interestID := seedCandidate(t, db, "Go 1.24 新特性", "https://go.dev/new", []float32{0.95, 0.3, 0, 0}, 2)
+	unrelatedID := seedCandidate(t, db, "园艺日记", "https://garden.com/a", []float32{0, 0.2, 0.98, 0}, 2)
+	adishID := seedCandidate(t, db, "限时促销", "https://ad.com/a", []float32{-0.97, 0.1, 0, 0}, 1)
 
 	scored, err = r.Recommend(20)
 	if err != nil {
@@ -111,8 +111,8 @@ func TestRecommenderFallback(t *testing.T) {
 	db, profile := newRecTestDB(t)
 
 	// 无任何簇（画像空）→ 走降级链：新文章按新鲜度排
-	newID := seedCandidate(t, db, "新鲜事", "https://n.com/a", nil, 1, false)
-	oldID := seedCandidate(t, db, "旧闻", "https://n.com/b", nil, 200, false)
+	newID := seedCandidate(t, db, "新鲜事", "https://n.com/a", nil, 1)
+	oldID := seedCandidate(t, db, "旧闻", "https://n.com/b", nil, 200)
 
 	r := NewRecommender(db.DB, profile)
 	scored, err := r.Recommend(10)

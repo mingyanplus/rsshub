@@ -164,7 +164,7 @@ func (d *DB) UpdateTopicSummary(topicID int64, summary string) error {
 
 // GetTopicByID 根据 ID 获取话题
 func (d *DB) GetTopicByID(id int64) (*models.Topic, error) {
-	row := d.db.QueryRow(`SELECT ` + topicDisplayCols + ` FROM topics WHERE id = ?`, id)
+	row := d.db.QueryRow(`SELECT `+topicDisplayCols+` FROM topics WHERE id = ?`, id)
 	t, err := scanTopic(row)
 	if err != nil {
 		return nil, err

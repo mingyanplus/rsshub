@@ -17,8 +17,8 @@ type HotTopicDetector struct {
 	db               *database.DB
 	analyzer         *ai.Analyzer
 	clusteringEngine *ClusteringEngine
-	minArticles      int       // 最小文章数阈值
-	minClusterSize   int       // 最小聚类大小
+	minArticles      int           // 最小文章数阈值
+	minClusterSize   int           // 最小聚类大小
 	timeWindow       time.Duration // 时间窗口
 }
 
@@ -28,21 +28,21 @@ func NewHotTopicDetector(db *database.DB, analyzer *ai.Analyzer) *HotTopicDetect
 		db:               db,
 		analyzer:         analyzer,
 		clusteringEngine: NewClusteringEngine(analyzer),
-		minArticles:      5,      // 至少5篇相关文章
-		minClusterSize:   3,      // 聚类至少3篇文章
+		minArticles:      5,              // 至少5篇相关文章
+		minClusterSize:   3,              // 聚类至少3篇文章
 		timeWindow:       24 * time.Hour, // 24小时内的文章
 	}
 }
 
 // HotTopicCandidate 热点候选
 type HotTopicCandidate struct {
-	Name        string   `json:"name"`
-	Keywords    []string `json:"keywords"`
-	ArticleIDs  []int64  `json:"article_ids"`
-	ArticleCount int     `json:"article_count"`
-	Description string   `json:"description"`
-	Trend       string   `json:"trend"` // rising, stable, declining
-	Score       float64  `json:"score"` // 热度分数
+	Name         string   `json:"name"`
+	Keywords     []string `json:"keywords"`
+	ArticleIDs   []int64  `json:"article_ids"`
+	ArticleCount int      `json:"article_count"`
+	Description  string   `json:"description"`
+	Trend        string   `json:"trend"` // rising, stable, declining
+	Score        float64  `json:"score"` // 热度分数
 }
 
 // DetectHotTopics 检测热点事件

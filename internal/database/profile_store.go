@@ -2,7 +2,6 @@ package database
 
 import (
 	"database/sql"
-	"strings"
 
 	"rss-ai/internal/models"
 )
@@ -83,7 +82,7 @@ type FeedArticleDigest struct {
 	FeedID   int64
 	Title    string
 	Vectors  [][]byte // 近期文章 embedding（原样 BLOB）
-	Keywords []string // 近期文章关键词（去重）
+	Keywords []string // 近期文章的 keywords 原文（解析交给 processor，保证口径一致）
 }
 
 // ListFeedArticleDigests 每个活跃订阅源取近期带向量文章的 embedding 与关键词
@@ -118,7 +117,6 @@ func (d *DB) ListFeedArticleDigests(limit int) ([]*FeedArticleDigest, error) {
 			return nil, err
 		}
 		digest := &FeedArticleDigest{FeedID: f.id, Title: f.title}
-		kwSeen := make(map[string]bool)
 		for rows.Next() {
 			var emb []byte
 			var keywords string
@@ -127,11 +125,8 @@ func (d *DB) ListFeedArticleDigests(limit int) ([]*FeedArticleDigest, error) {
 				return nil, err
 			}
 			digest.Vectors = append(digest.Vectors, emb)
-			for _, kw := range splitKeywords(keywords) {
-				if !kwSeen[kw] {
-					kwSeen[kw] = true
-					digest.Keywords = append(digest.Keywords, kw)
-				}
+			if keywords != "" {
+				digest.Keywords = append(digest.Keywords, keywords)
 			}
 		}
 		rows.Close()
@@ -140,16 +135,4 @@ func (d *DB) ListFeedArticleDigests(limit int) ([]*FeedArticleDigest, error) {
 		}
 	}
 	return digests, nil
-}
-
-// splitKeywords 拆分逗号分隔的关键词串
-func splitKeywords(s string) []string {
-	parts := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '，' })
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
 }

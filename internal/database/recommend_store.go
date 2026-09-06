@@ -119,25 +119,3 @@ func (d *DB) ListFeedBehaviorStats() (map[int64]*FeedBehaviorStats, error) {
 	rows.Close()
 	return stats, nil
 }
-
-// ListReadTopicDistribution 已读文章的主题类别分布（coverage 通道用：找阅读占比 <2% 的盲区）
-func (d *DB) ListReadTopicDistribution() (map[string]int, int, error) {
-	rows, err := d.db.Query(`SELECT topic_category, COUNT(*) FROM articles WHERE is_read = TRUE GROUP BY topic_category`)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	dist := make(map[string]int)
-	total := 0
-	for rows.Next() {
-		var cat string
-		var n int
-		if err := rows.Scan(&cat, &n); err != nil {
-			return nil, 0, err
-		}
-		dist[cat] = n
-		total += n
-	}
-	return dist, total, rows.Err()
-}

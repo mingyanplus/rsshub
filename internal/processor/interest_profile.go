@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,10 +34,10 @@ const (
 	decaySingleSamplePos = 30  // 单样本正簇保留天数
 	decaySingleSampleNeg = 60
 
-	seedMinReadLogs = 20      // 行为日志超过此数不再做订阅先验冷启动
-	seedVectorCount = 20      // 每个 feed 取近期文章数
-	seedInitWeight  = 5.0     // 初始先验簇权重
-	seedLabelLimit  = 3       // 初始标签取关键词数
+	seedMinReadLogs = 20  // 行为日志超过此数不再做订阅先验冷启动
+	seedVectorCount = 20  // 每个 feed 取近期文章数
+	seedInitWeight  = 5.0 // 初始先验簇权重
+	seedLabelLimit  = 3   // 初始标签取关键词数
 )
 
 // Polarity 簇极性
@@ -100,22 +101,14 @@ func (p *InterestProfile) RecordFeedback(article *models.Article, polarity strin
 	switch {
 	case best != nil && bestSim >= mergeThreshold:
 		// 并入最相似簇：质心加权更新
-		p.mergeIntoCluster(best, vec, mult, articleKeywords(article), now)
-		if err := p.db.UpdateInterestCluster(best); err != nil {
-			log.Printf("兴趣画像: 更新簇 %d 失败: %v", best.ID, err)
-		}
+		p.mergeBestAndSave(best, vec, mult, article, now)
 	case best == nil || bestSim >= createThreshold:
 		// 独立新兴趣：新建簇（必要时先压缩腾位）
 		if len(clusters) >= clusterLimit(polarity) {
-			if !p.compressClusters(clusters) {
+			if !p.compressClusters(clusters) && best != nil {
 				// 无法压缩时并入最相似簇兜底
-				if best != nil {
-					p.mergeIntoCluster(best, vec, mult, articleKeywords(article), now)
-					if err := p.db.UpdateInterestCluster(best); err != nil {
-						log.Printf("兴趣画像: 更新簇 %d 失败: %v", best.ID, err)
-					}
-					return
-				}
+				p.mergeBestAndSave(best, vec, mult, article, now)
+				return
 			}
 		}
 		c := &models.InterestCluster{
@@ -136,64 +129,12 @@ func (p *InterestProfile) RecordFeedback(article *models.Article, polarity strin
 	}
 }
 
-// MatchScores 计算文章向量与画像的匹配度（排序时用）
-// 返回：正簇最大相似（低于匹配阈值取 0）与对应标签、负簇最大相似（低于惩罚阈值取 0）与对应标签
-func (p *InterestProfile) MatchScores(vec []float32) (posMatch float64, posLabel string, negSim float64, negLabel string) {
-	if len(vec) == 0 {
-		return 0, "", 0, ""
+// mergeBestAndSave 质心加权并入指定簇并持久化
+func (p *InterestProfile) mergeBestAndSave(best *models.InterestCluster, vec []float32, mult float64, article *models.Article, now int64) {
+	p.mergeIntoCluster(best, vec, mult, articleKeywords(article), now)
+	if err := p.db.UpdateInterestCluster(best); err != nil {
+		log.Printf("兴趣画像: 更新簇 %d 失败: %v", best.ID, err)
 	}
-	posMatch, posLabel = p.bestMatch(vec, PolarityPositive)
-	if posMatch < clusterPosMatchThreshold {
-		posMatch = 0
-	}
-	negSim, negLabel = p.bestMatch(vec, PolarityNegative)
-	if negSim < clusterNegPenaltyThreshold {
-		negSim = 0
-	}
-	return
-}
-
-// AdjacentClusters 取与给定向量最相近的 n 个正簇质心（邻接簇召回用，排除命中簇自身）
-func (p *InterestProfile) AdjacentClusters(vec []float32, n int) ([][]float32, []string) {
-	clusters, err := p.db.ListInterestClusters(PolarityPositive)
-	if err != nil {
-		return nil, nil
-	}
-	type scored struct {
-		vec   []float32
-		label string
-		sim   float64
-	}
-	var all []scored
-	for _, c := range clusters {
-		centroid, err := ai.DeserializeEmbedding(c.Centroid)
-		if err != nil || len(centroid) == 0 {
-			continue
-		}
-		sim := float64(ai.CalculateCosineSimilarity(vec, centroid))
-		if sim < clusterPosMatchThreshold {
-			continue // 邻接簇：低于正簇匹配阈值的才算"相邻"而非"同主题"
-		}
-		all = append(all, scored{vec: centroid, label: c.Label, sim: sim})
-	}
-	// 排序取前 n
-	for i := 0; i < len(all); i++ {
-		for j := i + 1; j < len(all); j++ {
-			if all[j].sim > all[i].sim {
-				all[i], all[j] = all[j], all[i]
-			}
-		}
-	}
-	if len(all) > n {
-		all = all[:n]
-	}
-	vecs := make([][]float32, 0, len(all))
-	labels := make([]string, 0, len(all))
-	for _, s := range all {
-		vecs = append(vecs, s.vec)
-		labels = append(labels, s.label)
-	}
-	return vecs, labels
 }
 
 // PositiveCentroids 返回全部正簇（质心+标签+权重），排序/召回用
@@ -318,12 +259,17 @@ func (p *InterestProfile) SeedFromSubscriptions() error {
 		for i, s := range sum {
 			mean[i] = float32(s / float64(count))
 		}
+		// 关键词解析统一走 parseKeywords（与反馈入簇同口径）
+		var kws []string
+		for _, raw := range digest.Keywords {
+			kws = mergeKeywords(kws, parseKeywords(raw))
+		}
 		c := &models.InterestCluster{
 			Polarity:     PolarityPositive,
 			Weight:       seedInitWeight,
 			SampleCount:  count,
 			LastActiveAt: now,
-			Label:        pickNonEmpty(joinKeywords(digest.Keywords, seedLabelLimit), digest.Title),
+			Label:        pickNonEmpty(joinKeywords(kws, seedLabelLimit), digest.Title),
 			CreatedAt:    now,
 		}
 		c.Centroid = normalizeVec(mean)
@@ -405,7 +351,7 @@ func (p *InterestProfile) compressClusters(clusters []*models.InterestCluster) b
 	a.Centroid = normalizeVecF64(merged)
 	a.Weight = math.Min(clusterWeightCap, total)
 	a.SampleCount += b.SampleCount
-	a.LastActiveAt = maxInt64(a.LastActiveAt, b.LastActiveAt)
+	a.LastActiveAt = max(a.LastActiveAt, b.LastActiveAt)
 	a.Label = pickNonEmpty(a.Label, b.Label)
 	if err := p.db.UpdateInterestCluster(a); err != nil {
 		log.Printf("兴趣画像: 压缩簇失败: %v", err)
@@ -416,30 +362,6 @@ func (p *InterestProfile) compressClusters(clusters []*models.InterestCluster) b
 		return false
 	}
 	return true
-}
-
-// bestMatch 找同极性最相似簇
-func (p *InterestProfile) bestMatch(vec []float32, polarity string) (float64, string) {
-	clusters, err := p.db.ListInterestClusters(polarity)
-	if err != nil {
-		return 0, ""
-	}
-	bestSim := -1.0
-	bestLabel := ""
-	for _, c := range clusters {
-		centroid, err := ai.DeserializeEmbedding(c.Centroid)
-		if err != nil || len(centroid) == 0 {
-			continue
-		}
-		sim := float64(ai.CalculateCosineSimilarity(vec, centroid))
-		if sim > bestSim {
-			bestSim, bestLabel = sim, c.Label
-		}
-	}
-	if bestSim < 0 {
-		return 0, ""
-	}
-	return bestSim, bestLabel
 }
 
 // articleVector 文章向量（优先全文向量，其次总结向量）
@@ -460,39 +382,14 @@ func articleVector(a *models.Article) []float32 {
 	return nil
 }
 
-// articleKeywords 文章关键词列表
+// articleKeywords 文章关键词列表（复用 clustering.go 的 mergeKeywords 去重合并）
 func articleKeywords(a *models.Article) []string {
-	var out []string
-	seen := make(map[string]bool)
-	add := func(list []string) {
-		for _, k := range list {
-			if k != "" && !seen[k] {
-				seen[k] = true
-				out = append(out, k)
-			}
-		}
-	}
-	add(parseKeywords(a.Keywords))
-	add(parseTags(a.TagsCache))
-	return out
+	return mergeKeywords(parseKeywords(a.Keywords), parseTags(a.TagsCache))
 }
 
 // mergeClusterLabel 标签合并：新文章关键词优先，旧标签词补位，取前 limit 个
 func mergeClusterLabel(oldLabel string, keywords []string, limit int) string {
-	old := parseKeywords(oldLabel)
-	merged := append(append([]string{}, keywords...), old...)
-	seen := make(map[string]bool)
-	var out []string
-	for _, k := range merged {
-		if k != "" && !seen[k] {
-			seen[k] = true
-			out = append(out, k)
-			if len(out) >= limit {
-				break
-			}
-		}
-	}
-	return joinKeywords(out, limit)
+	return joinKeywords(mergeKeywords(keywords, parseKeywords(oldLabel)), limit)
 }
 
 // joinKeywords 取前 limit 个关键词用顿号连接
@@ -500,14 +397,7 @@ func joinKeywords(kws []string, limit int) string {
 	if len(kws) > limit {
 		kws = kws[:limit]
 	}
-	out := ""
-	for i, k := range kws {
-		if i > 0 {
-			out += "、"
-		}
-		out += k
-	}
-	return out
+	return strings.Join(kws, "、")
 }
 
 // pickNonEmpty 返回第一个非空字符串
@@ -520,24 +410,13 @@ func pickNonEmpty(vals ...string) string {
 	return ""
 }
 
-func maxInt64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// normalizeVec L2 归一化
+// normalizeVec L2 归一化（float32 输入，委托 float64 实现）
 func normalizeVec(v []float32) []byte {
 	f64 := make([]float64, len(v))
 	for i, x := range v {
 		f64[i] = float64(x)
 	}
-	b, err := ai.SerializeEmbedding(normalized32(f64))
-	if err != nil {
-		return nil
-	}
-	return b
+	return normalizeVecF64(f64)
 }
 
 // normalizeVecF64 L2 归一化（float64 输入）

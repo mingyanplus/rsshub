@@ -351,7 +351,8 @@ let exposureQueue = [];
 let exposureTimer = null;
 
 function queueExposure(articleId, position, channel) {
-    exposureQueue.push({ article_id: articleId, position: position, channel: channel || 'freshness' });
+    // channel 为空表示非推荐流曝光（后端统计自动忽略）
+    exposureQueue.push({ article_id: articleId, position: position, channel: channel || '' });
     if (exposureQueue.length >= 100) flushExposures(false);
     else if (!exposureTimer) exposureTimer = setTimeout(() => flushExposures(false), 10000);
 }
@@ -507,7 +508,8 @@ async function loadArticles(append = false) {
         articles.forEach((article, idx) => {
             const card = createArticleCard(article);
             grid.insertAdjacentHTML('beforeend', card);
-            queueExposure(article.id, currentOffset + idx, article.channel || 'freshness');
+            // channel 是召回通道（服务端赋予）：仅推荐流携带；普通列表留空，不混入通道统计
+            queueExposure(article.id, currentOffset + idx, article.channel || '');
         });
 
         currentOffset += articles.length;

@@ -224,11 +224,11 @@ func (m *EventMatcher) calculateKeywordScore(title, content, keywords string) fl
 	// 基础分：匹配至少1个关键词
 	// 使用对数曲线： 1个关键词 = 0.4, 2个 = 0.6, 3个 = 0.75, 4个 = 0.8...
 	// 公式: score = matchedCount / (matchedCount + 1)
-	baseScore := float64(matchedCount) / float64(matchedCount + 1)
+	baseScore := float64(matchedCount) / float64(matchedCount+1)
 
 	// 如果匹配的关键词数量较多，给予额外奖励
 	if matchedCount >= 3 {
-		baseScore = math.Min(baseScore + 0.1, 1.0)
+		baseScore = math.Min(baseScore+0.1, 1.0)
 	}
 
 	return baseScore
@@ -268,7 +268,7 @@ func (m *EventMatcher) calculateNegativeKeywordScore(title, content, negativeKey
 	// matchedCount=1 -> 0.50 * 2 = 1.0
 	// matchedCount=2 -> 0.67 * 2 = 1.34
 	// matchedCount=3 -> 0.75 * 2 = 1.5
-	baseScore := float64(matchedCount) / float64(matchedCount + 1)
+	baseScore := float64(matchedCount) / float64(matchedCount+1)
 
 	// 惩罚力度加倍
 	penalty := baseScore * 2.0

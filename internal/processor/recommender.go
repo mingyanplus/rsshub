@@ -35,23 +35,18 @@ const (
 	fallbackStateRead       = -0.06
 )
 
-// 推荐通道
-const (
-	ChannelPrecise   = "precise"   // 精准：正簇匹配
-	ChannelFreshness = "freshness" // 新鲜度
-)
-
 // ScoredArticle 带分数分项的推荐结果
 type ScoredArticle struct {
 	Article   *models.Article
 	Score     float64
-	Interest  float64 `json:"interest"`
-	Source    float64 `json:"source"`
-	Freshness float64 `json:"freshness"`
-	State     float64 `json:"state"`
-	Penalty   float64 `json:"penalty"`
-	Reason    string  `json:"reason"`
-	Channel   string  `json:"channel"`
+	Interest  float64   `json:"interest"`
+	Source    float64   `json:"source"`
+	Freshness float64   `json:"freshness"`
+	State     float64   `json:"state"`
+	Penalty   float64   `json:"penalty"`
+	Reason    string    `json:"reason"`
+	Channel   string    `json:"channel"`
+	vec       []float32 // 已反序列化的文章向量（管线内部传递，不序列化）
 }
 
 // Recommender 推荐排序引擎（P3：精准 + 新鲜度双通道）
@@ -65,9 +60,9 @@ func NewRecommender(db *database.DB, profile *InterestProfile) *Recommender {
 	return &Recommender{db: db, profile: profile}
 }
 
-// Recommend 生成推荐列表（精选模式默认配比）：五路召回 → 多因子打分 → MMR 重排
+// Recommend 生成推荐列表（精选模式，含通道自适应权重）：五路召回 → 多因子打分 → MMR 重排
 func (r *Recommender) Recommend(limit int) ([]*ScoredArticle, error) {
-	return r.RecommendWithMix(limit, defaultChannelMix)
+	return r.RecommendMode("curated", limit)
 }
 
 // RecommendWithMix 按指定通道配比推荐（P5 双模式：curated / discover 查不同配比表）
@@ -83,50 +78,66 @@ func (r *Recommender) RecommendWithMix(limit int, mix map[string]float64) ([]*Sc
 		return nil, nil
 	}
 
-	// 五路召回（含曝光冷却过滤，候选池查询已剔除冷却文章）
-	recalled := r.recall(candidates, limit, mix)
-	if len(recalled) == 0 {
-		return nil, nil
-	}
-
+	// 画像与统计每请求只加载一次，贯穿召回与打分
 	feedStats, err := r.db.ListFeedBehaviorStats()
 	if err != nil {
 		feedStats = map[int64]*database.FeedBehaviorStats{}
 	}
 	authority := feedAuthorityMap(r.db)
-
-	// 画像可用性：存在正簇才启用兴趣分（否则整体走降级链）
 	posClusters, posCentroids := r.profile.PositiveCentroids()
 	_, negCentroids := r.profile.NegativeCentroids()
 	profileReady := len(posClusters) > 0
 
+	// 预计算候选向量与正/负簇匹配度（召回排序与打分共用，不重复反序列化）
+	pool := buildRecallPool(candidates, posCentroids, negCentroids, profileReady)
+
+	// 五路召回（候选池查询已剔除曝光冷却文章）
+	recalled := r.recall(pool, posClusters, posCentroids, limit, mix)
+	if len(recalled) == 0 {
+		return nil, nil
+	}
+
 	now := time.Now()
-	var scored []*ScoredArticle
-	for _, cand := range recalled {
-		a := cand.Article
-		var vec []float32
-		if cand.HasVec {
-			vec = articleVector(a)
-		}
+	scored := make([]*ScoredArticle, 0, len(recalled))
+	for _, rc := range recalled {
+		a := rc.cand.Article
 
 		var s *ScoredArticle
-		if profileReady && len(vec) > 0 {
-			posMatch, posLabel := bestPositiveMatch(vec, posClusters, posCentroids)
-			negSim := bestSimilarity(vec, negCentroids)
+		if profileReady && len(rc.vec) > 0 {
+			posMatch, posLabel := bestPositiveMatch(rc.vec, posClusters, posCentroids)
+			negSim := rc.negSim
 			if negSim < clusterNegPenaltyThreshold {
 				negSim = 0
 			}
-			s = r.scoreFull(a, vec, posMatch, posLabel, negSim, authority, feedStats, now)
+			s = r.scoreFull(a, rc.vec, posMatch, posLabel, negSim, authority, feedStats, now)
 		} else {
 			s = scoreFallback(a, authority, feedStats, now)
 		}
 		// 通道标记以召回结果为准（召回阶段已做配额分配）
-		s.Channel = cand.Channel
+		s.Channel = rc.cand.Channel
+		s.vec = rc.vec
 		scored = append(scored, s)
 	}
 
 	// MMR + 主题配额 + 探索保底
 	return rerankAndFinalize(scored, limit), nil
+}
+
+// buildRecallPool 一次性反序列化候选向量并计算与正/负簇质心的匹配度
+func buildRecallPool(candidates []*database.RecommendationCandidate, posCentroids, negCentroids [][]float32, profileReady bool) []recallCandidate {
+	pool := make([]recallCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		rc := recallCandidate{cand: c}
+		if c.HasVec {
+			rc.vec = articleVector(c.Article)
+		}
+		if profileReady && len(rc.vec) > 0 {
+			rc.posSim = bestSimilarity(rc.vec, posCentroids)
+			rc.negSim = bestSimilarity(rc.vec, negCentroids)
+		}
+		pool = append(pool, rc)
+	}
+	return pool
 }
 
 // scoreFull 完整多因子打分（§5 公式）
@@ -192,7 +203,7 @@ func sourceScore(a *models.Article, authority map[int64]int, feedStats map[int64
 	if s, ok := feedStats[a.FeedID]; ok && s != nil {
 		total := s.Positive + s.Negative
 		if total > 0 {
-			score += math.Tanh(float64(s.Positive-s.Negative) / float64(total+1)) * scoreSourceBehavior
+			score += math.Tanh(float64(s.Positive-s.Negative)/float64(total+1)) * scoreSourceBehavior
 		}
 		score += clamp01(s.ReadRate) * scoreSourceReadRate
 	}
@@ -269,7 +280,7 @@ func articleAgeHours(a *models.Article, now time.Time) float64 {
 // bestPositiveMatch 与正簇质心集合算最大匹配（低于匹配阈值取 0）
 func bestPositiveMatch(vec []float32, clusters []models.InterestCluster, centroids [][]float32) (posMatch float64, posLabel string) {
 	for i := range centroids {
-		sim := cosineSim(vec, centroids[i])
+		sim := ai.CalculateCosineSimilarity(vec, centroids[i])
 		if sim > posMatch {
 			posMatch = sim
 			if i < len(clusters) {
@@ -283,16 +294,11 @@ func bestPositiveMatch(vec []float32, clusters []models.InterestCluster, centroi
 	return posMatch, posLabel
 }
 
-// cosineSim float32 向量余弦相似度（float64 返回）
-func cosineSim(a, b []float32) float64 {
-	return float64(ai.CalculateCosineSimilarity(a, b))
-}
-
 // bestSimilarity 与一组质心的最大相似度
 func bestSimilarity(vec []float32, centroids [][]float32) float64 {
 	best := 0.0
 	for _, c := range centroids {
-		if sim := cosineSim(vec, c); sim > best {
+		if sim := ai.CalculateCosineSimilarity(vec, c); sim > best {
 			best = sim
 		}
 	}

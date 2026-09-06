@@ -2,18 +2,35 @@ package processor
 
 import (
 	"log"
-	"sort"
 	"time"
 )
 
 // 通道权重自适应参数（方案 §7.2 简化 MAB）
 const (
-	channelClickFactor = 1.1  // 点击/读完：权重 ×1.1
-	channelSkipFactor  = 0.95 // 曝光未点击：权重 ×0.95
-	channelWeightMin   = 0.2  // 单通道权重下限（防跌零）
-	channelWeightMax   = 3.0  // 单通道权重上限（防独大）
+	ChannelClickFactor = 1.1           // 点击/读完：权重增益（导出供 handler 引用）
+	channelSkipFactor  = 0.95          // 曝光未点击：权重 ×0.95
+	channelWeightMin   = 0.2           // 单通道权重下限（防跌零）
+	channelWeightMax   = 3.0           // 单通道权重上限（防独大）
 	channelSkipWindow  = 7 * 24 * 3600 // 跳过惩罚统计窗口（秒）
 )
+
+// 推荐通道（五通道，方案 §4）与双模式配比统一在此定义
+const (
+	ChannelPrecise   = "precise"   // 精准：正簇匹配
+	ChannelFreshness = "freshness" // 新鲜度
+	ChannelAdjacent  = "adjacent"  // 邻接簇
+	ChannelCoverage  = "coverage"  // 主题覆盖（盲区）
+	ChannelRandom    = "random"    // 随机探索
+)
+
+// defaultChannelMix 精选模式默认配比（方案附录）
+var defaultChannelMix = map[string]float64{
+	ChannelPrecise:   0.50,
+	ChannelFreshness: 0.15,
+	ChannelAdjacent:  0.15,
+	ChannelCoverage:  0.10,
+	ChannelRandom:    0.10,
+}
 
 // discoverChannelMix 拓展发现模式配比（方案 §6.5：探索主导）
 var discoverChannelMix = map[string]float64{
@@ -69,45 +86,58 @@ func (r *Recommender) AdjustChannelWeight(channel string, factor float64) {
 	if channel == "" {
 		return
 	}
-	weights, err := r.db.GetChannelWeights()
-	if err != nil {
-		log.Printf("通道权重: 读取失败: %v", err)
+	weights, ok := r.loadChannelWeights()
+	if !ok {
 		return
 	}
-	// 确保五个通道都有记录
-	for ch := range defaultChannelMix {
-		if _, ok := weights[ch]; !ok {
-			weights[ch] = 1
-		}
-	}
-	w := weights[channel] * factor
-	if w < channelWeightMin {
-		w = channelWeightMin
-	} else if w > channelWeightMax {
-		w = channelWeightMax
-	}
-	weights[channel] = w
-
+	applyFactor(weights, channel, factor)
 	if err := r.db.SaveChannelWeights(normalizeWeights(weights)); err != nil {
 		log.Printf("通道权重: 写回失败: %v", err)
 	}
 }
 
 // ApplyChannelSkipPenalty 跳过惩罚：对 [7天前, 6天前) 窗口内曝光至今未点击的通道 ×0.95
-// （每天只惩罚一天的量，避免旧文章被重复计罚；每日衰减任务调用）
+// （每天只惩罚一天的量，避免旧文章被重复计罚；每日衰减任务调用。批量读一次改一次写）
 func (r *Recommender) ApplyChannelSkipPenalty() error {
 	now := time.Now().Unix()
 	channels, err := r.db.ListUnclickedExposureChannels(now-channelSkipWindow, now-channelSkipWindow+24*3600)
-	if err != nil {
+	if err != nil || len(channels) == 0 {
 		return err
 	}
+	weights, ok := r.loadChannelWeights()
+	if !ok {
+		return nil
+	}
 	for _, ch := range channels {
-		r.AdjustChannelWeight(ch, channelSkipFactor)
+		applyFactor(weights, ch, channelSkipFactor)
 	}
-	if len(channels) > 0 {
-		log.Printf("通道权重: 跳过惩罚应用于 %v", channels)
+	if err := r.db.SaveChannelWeights(normalizeWeights(weights)); err != nil {
+		return err
 	}
+	log.Printf("通道权重: 跳过惩罚应用于 %v", channels)
 	return nil
+}
+
+// loadChannelWeights 读取权重并补全五通道缺省记录
+func (r *Recommender) loadChannelWeights() (map[string]float64, bool) {
+	weights, err := r.db.GetChannelWeights()
+	if err != nil {
+		log.Printf("通道权重: 读取失败: %v", err)
+		return nil, false
+	}
+	for ch := range defaultChannelMix {
+		if _, ok := weights[ch]; !ok {
+			weights[ch] = 1
+		}
+	}
+	return weights, true
+}
+
+// applyFactor 单通道权重乘系数并夹紧到 [min, max]
+func applyFactor(weights map[string]float64, channel string, factor float64) {
+	w := weights[channel] * factor
+	w = min(channelWeightMax, max(channelWeightMin, w))
+	weights[channel] = w
 }
 
 // normalizeWeights 权重归一化到均值 1（保持相对比例，总量不漂移）
@@ -124,14 +154,4 @@ func normalizeWeights(weights map[string]float64) map[string]float64 {
 		weights[ch] = w * n / total
 	}
 	return weights
-}
-
-// sortedChannels 通道名有序列表（日志/调试用）
-func sortedChannels(m map[string]float64) []string {
-	out := make([]string, 0, len(m))
-	for ch := range m {
-		out = append(out, ch)
-	}
-	sort.Strings(out)
-	return out
 }

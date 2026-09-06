@@ -146,10 +146,10 @@ func LoginSubmit(w http.ResponseWriter, r *http.Request) {
 // Logout 退出登录，清除会话
 func Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     authCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
+		Name:   authCookieName,
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }

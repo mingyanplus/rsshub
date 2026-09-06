@@ -410,12 +410,12 @@ type ArticleQueryType int
 
 const (
 	QueryMissingSummaryEmbedding ArticleQueryType = iota // 已处理但缺少 summary_embedding
-	QueryMissingOneLineSummary                            // 需要重新 AI 分析
-	QueryIncomplete                                        // 处理不完整（缺少 entities/one_line_summary/summary_embedding）
+	QueryMissingOneLineSummary                           // 需要重新 AI 分析
+	QueryIncomplete                                      // 处理不完整（缺少 entities/one_line_summary/summary_embedding）
 )
 
 // GetArticlesByQueryType 通用文章查询（消除重复代码）
-// 使用 "keywords IS NOT NULL AND keywords != '' AND keywords != '[]'" 作为"已处理"的判断标准
+// 使用 "keywords IS NOT NULL AND keywords != ” AND keywords != '[]'" 作为"已处理"的判断标准
 func (d *DB) GetArticlesByQueryType(queryType ArticleQueryType, limit int) ([]*models.Article, error) {
 	var whereClause string
 	switch queryType {
@@ -1052,11 +1052,11 @@ func (d *DB) GetStats() (map[string]int, error) {
 
 // HotTag 热门标签
 type HotTag struct {
-	ID          int64
-	Name        string
-	Color       string
-	TodayCount  int
-	TotalCount  int
+	ID         int64
+	Name       string
+	Color      string
+	TodayCount int
+	TotalCount int
 }
 
 // GetTodayHotTags 获取最近热门标签（按出现次数排序）

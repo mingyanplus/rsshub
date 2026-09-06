@@ -41,16 +41,16 @@ const (
 
 // TopicAggregator 话题聚合器：将 AI 分析完成的文章归入自动话题（Readhub 式话题流）
 type TopicAggregator struct {
-	db             *database.DB
-	analyzer       *ai.Analyzer
-	minSimilarity  float64       // 合入既有话题的最小余弦相似度
-	activeWindow   time.Duration // 活跃话题窗口：超过该时长未更新的话题不再参与合入
-	summaryRefresh time.Duration // 话题摘要 LLM 重写的最小间隔（控成本）
-	archiveWindow  time.Duration // 超过该时长无更新则归档
-	mu             sync.Mutex    // 串行化聚合，避免并发分析创建重复话题
-	lastArchiveRun time.Time     // 上次归档清理时间（内部节流）
-	cache              []*cachedTopic // 活跃话题缓存（mu 保护下维护，合入/新建时同步更新）
-	cacheAt            time.Time
+	db                  *database.DB
+	analyzer            *ai.Analyzer
+	minSimilarity       float64        // 合入既有话题的最小余弦相似度
+	activeWindow        time.Duration  // 活跃话题窗口：超过该时长未更新的话题不再参与合入
+	summaryRefresh      time.Duration  // 话题摘要 LLM 重写的最小间隔（控成本）
+	archiveWindow       time.Duration  // 超过该时长无更新则归档
+	mu                  sync.Mutex     // 串行化聚合，避免并发分析创建重复话题
+	lastArchiveRun      time.Time      // 上次归档清理时间（内部节流）
+	cache               []*cachedTopic // 活跃话题缓存（mu 保护下维护，合入/新建时同步更新）
+	cacheAt             time.Time
 	summaryBackoffUntil time.Time // LLM 摘要失败后的退避截止时间（全局）
 }
 
