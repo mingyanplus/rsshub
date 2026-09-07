@@ -446,6 +446,11 @@ func parseKeywords(keywords string) []string {
 	return parseTags(keywords) // 格式相同
 }
 
+// ParseKeywords 解析关键词（导出版本，供 server 等外部包使用，与包内同口径）
+func ParseKeywords(keywords string) []string {
+	return parseKeywords(keywords)
+}
+
 // extractCommonKeywords 提取聚类共同关键词
 func extractCommonKeywords(articles []*models.Article) []string {
 	if len(articles) == 0 {

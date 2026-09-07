@@ -55,10 +55,11 @@ func (d *DB) DeleteInterestCluster(id int64) error {
 	return err
 }
 
-// CountReadLogs 统计阅读行为日志条数（判断冷启动条件用）
+// CountReadLogs 统计阅读行为日志条数（判断冷启动条件用；
+// 排除话题粒度的 topic_view/topic_skip 行，门槛保持文章粒度——只刷话题不开文章不抑制订阅先验）
 func (d *DB) CountReadLogs() (int, error) {
 	var count int
-	err := d.db.QueryRow(`SELECT COUNT(*) FROM read_logs`).Scan(&count)
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM read_logs WHERE action NOT IN ('topic_view', 'topic_skip')`).Scan(&count)
 	return count, err
 }
 

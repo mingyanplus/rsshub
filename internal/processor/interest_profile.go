@@ -59,12 +59,28 @@ func NewInterestProfile(db *database.DB) *InterestProfile {
 
 // RecordFeedback 记录一次反馈并入簇（polarity=positive/negative，mult 为权重倍数如收藏 ×2）
 func (p *InterestProfile) RecordFeedback(article *models.Article, polarity string, mult float64) {
+	p.recordVectorFeedback(articleVector(article), articleKeywords(article), polarity, mult)
+}
+
+// RecordTopicFeedback 记录话题反馈并入簇（向量与关键词取自话题自身；
+// 向量/关键词的解析留在本包，与文章反馈同口径）
+func (p *InterestProfile) RecordTopicFeedback(topic *models.Topic, polarity string, mult float64) {
+	vec, err := ai.DeserializeEmbedding(topic.Embedding)
+	if err != nil || len(vec) == 0 {
+		log.Printf("兴趣画像: 话题 %d 无代表向量，跳过反馈", topic.ID)
+		return
+	}
+	p.recordVectorFeedback(vec, parseKeywords(topic.Keywords), polarity, mult)
+}
+
+// recordVectorFeedback 向量粒度的入簇实现（文章与话题共用）；
+// vec 为空时跳过（无向量的对象无法参与聚类）
+func (p *InterestProfile) recordVectorFeedback(vec []float32, keywords []string, polarity string, mult float64) {
 	if mult <= 0 {
 		mult = 1
 	}
-	vec := articleVector(article)
 	if len(vec) == 0 {
-		log.Printf("兴趣画像: 文章 %d 无向量，跳过反馈", article.ID)
+		log.Printf("兴趣画像: 反馈对象无向量，跳过 (keywords=%v)", keywords)
 		return
 	}
 
@@ -101,13 +117,13 @@ func (p *InterestProfile) RecordFeedback(article *models.Article, polarity strin
 	switch {
 	case best != nil && bestSim >= mergeThreshold:
 		// 并入最相似簇：质心加权更新
-		p.mergeBestAndSave(best, vec, mult, article, now)
+		p.mergeBestAndSave(best, vec, mult, keywords, now)
 	case best == nil || bestSim >= createThreshold:
 		// 独立新兴趣：新建簇（必要时先压缩腾位）
 		if len(clusters) >= clusterLimit(polarity) {
 			if !p.compressClusters(clusters) && best != nil {
 				// 无法压缩时并入最相似簇兜底
-				p.mergeBestAndSave(best, vec, mult, article, now)
+				p.mergeBestAndSave(best, vec, mult, keywords, now)
 				return
 			}
 		}
@@ -116,7 +132,7 @@ func (p *InterestProfile) RecordFeedback(article *models.Article, polarity strin
 			Weight:       math.Max(1, mult),
 			SampleCount:  1,
 			LastActiveAt: now,
-			Label:        joinKeywords(articleKeywords(article), seedLabelLimit),
+			Label:        joinKeywords(keywords, seedLabelLimit),
 			CreatedAt:    now,
 		}
 		c.Centroid = normalizeVec(vec)
@@ -125,13 +141,13 @@ func (p *InterestProfile) RecordFeedback(article *models.Article, polarity strin
 		}
 	default:
 		// 相似度过低且不足创建阈值：视为噪声，忽略
-		log.Printf("兴趣画像: 文章 %d 相似度 %.3f 低于创建阈值，忽略", article.ID, bestSim)
+		log.Printf("兴趣画像: 反馈向量相似度 %.3f 低于创建阈值，忽略", bestSim)
 	}
 }
 
 // mergeBestAndSave 质心加权并入指定簇并持久化
-func (p *InterestProfile) mergeBestAndSave(best *models.InterestCluster, vec []float32, mult float64, article *models.Article, now int64) {
-	p.mergeIntoCluster(best, vec, mult, articleKeywords(article), now)
+func (p *InterestProfile) mergeBestAndSave(best *models.InterestCluster, vec []float32, mult float64, keywords []string, now int64) {
+	p.mergeIntoCluster(best, vec, mult, keywords, now)
 	if err := p.db.UpdateInterestCluster(best); err != nil {
 		log.Printf("兴趣画像: 更新簇 %d 失败: %v", best.ID, err)
 	}

@@ -69,6 +69,20 @@ func recordFeedback(articleID int64, polarity string, mult float64) {
 	}()
 }
 
+// recordTopicFeedback 异步把话题行为并入兴趣画像（不影响请求路径）
+func recordTopicFeedback(topicID int64, polarity string, mult float64) {
+	if appInterestProfile == nil || appDB == nil {
+		return
+	}
+	go func() {
+		topic, err := appDB.GetTopicByIDWithEmbedding(topicID)
+		if err != nil {
+			return
+		}
+		appInterestProfile.RecordTopicFeedback(topic, polarity, mult)
+	}()
+}
+
 // SetConfig 设置应用配置
 func SetConfig(cfg *config.Config) {
 	appConfig = cfg
@@ -397,6 +411,8 @@ func NewRouter() *Router {
 		// 话题
 		r.Post("/topics/rebuild", RebuildTopics)
 		r.Post("/topics/{id}/to-event", ConvertTopicToEvent)
+		r.Get("/topics/{id}/detail", TopicDetailJSON)
+		r.Post("/topics/{id}/behavior", ReportTopicBehavior)
 
 		// Feed 管理
 		r.Get("/feeds", ListFeeds)
@@ -2144,6 +2160,16 @@ func classifyReadAction(progress float64, dwellMs int64) string {
 	return "open"
 }
 
+// classifyTopicAction 话题阅读深度判定（汇总粒度，阈值低于文章的 90s/0.9——话题摘要更短）：
+//   topic_view: 停留 ≥30s 或 滚动 ≥0.8（深度阅读 → 弱正反馈）
+//   topic_skip: 其余（<5s 划过由调用方直接忽略，不落日志）
+func classifyTopicAction(progress float64, dwellMs int64) string {
+	if dwellMs >= 30000 || progress >= 0.8 {
+		return "topic_view"
+	}
+	return "topic_skip"
+}
+
 // articleIDFromRequest 解析 URL 路径中的文章 ID（非法时已写 400 响应，返回 false）
 func articleIDFromRequest(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -2190,6 +2216,42 @@ func ReportArticleBehavior(w http.ResponseWriter, r *http.Request) {
 		recordFeedback(id, "positive", 1)
 	case "quick_bounce":
 		recordFeedback(id, "negative", 1)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "action": action})
+}
+
+// ReportTopicBehavior 上报话题阅读行为（话题详情页/仪表盘话题弹窗离开时触发）。
+// 深度阅读（classifyTopicAction）→ 话题代表向量弱正反馈（×topicFeedbackMult）；
+// read_logs 落 action=topic_view/topic_skip，article_id 存话题内最新一篇文章（审计线索：
+// 画像/通道统计按 action 白名单不受影响；CountReadLogs 冷启动门槛已排除话题行保持文章粒度）。
+func ReportTopicBehavior(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil {
+		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+		return
+	}
+	id, ok := articleIDFromRequest(w, r)
+	if !ok {
+		return
+	}
+	var req BehaviorReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	req.Progress = min(1, max(0, req.Progress))
+	if req.DwellMs < 5000 {
+		// 划过：不落日志不动画像（话题列表误触噪声大）
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "action": "topic_skip"})
+		return
+	}
+	action := classifyTopicAction(req.Progress, req.DwellMs)
+	if arts, err := appDB.GetTopicArticles(id, 1, 0); err == nil && len(arts) > 0 {
+		if err := appDB.InsertReadLog(arts[0].ID, action, req.Progress, req.DwellMs); err != nil {
+			log.Printf("写入话题行为日志失败: %v", err)
+		}
+	}
+	if action == "topic_view" {
+		recordTopicFeedback(id, "positive", topicFeedbackMult)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "action": action})
 }
@@ -3824,6 +3886,46 @@ func TopicsPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderTemplate(w, "topics", data)
+}
+
+// topicFeedbackMult 话题深度阅读的正反馈权重（读汇总粒度粗于读完单篇，取其一半）
+const topicFeedbackMult = 0.5
+
+// TopicDetailJSON 话题详情数据（仪表盘热门话题弹窗等前端动态加载用）
+func TopicDetailJSON(w http.ResponseWriter, r *http.Request) {
+	if appDB == nil {
+		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+		return
+	}
+	id, ok := articleIDFromRequest(w, r)
+	if !ok {
+		return
+	}
+	topic, err := appDB.GetTopicByID(id)
+	if err != nil {
+		http.Error(w, "Topic not found", http.StatusNotFound)
+		return
+	}
+	articles, err := appDB.GetTopicArticles(id, 20, 0)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load topic articles: %v", err), http.StatusInternalServerError)
+		return
+	}
+	feeds, _ := appDB.ListFeeds()
+	feedMap := make(map[int64]string)
+	for _, f := range feeds {
+		feedMap[f.ID] = f.Title
+	}
+	items := make([]ArticleResponse, 0, len(articles))
+	for _, a := range articles {
+		items = append(items, articleToResponse(a, feedMap))
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id": topic.ID, "title": topic.Title, "ai_summary": topic.AISummary,
+		"category": topic.Category, "heat_score": topic.HeatScore,
+		"source_count": topic.SourceCount, "article_count": topic.ArticleCount,
+		"keywords": processor.ParseKeywords(topic.Keywords), "articles": items,
+	})
 }
 
 // TopicDetailPage 话题详情页（完整相关新闻 + 同实体历史话题时间线）

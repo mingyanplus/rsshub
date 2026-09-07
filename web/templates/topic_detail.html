@@ -97,5 +97,33 @@ async function convertToEvent(topicID) {
         btn.textContent = '🔍 转为追踪事件';
     }
 }
+
+// ========== 话题阅读行为埋点（深度阅读 → 兴趣画像弱正反馈） ==========
+// 整页滚动进度：内容不足一屏视为已读完
+function topicScrollProgress() {
+    const doc = document.documentElement;
+    const scrollable = doc.scrollHeight - window.innerHeight;
+    if (scrollable <= 0) return 1;
+    return Math.min(1, Math.max(0, window.scrollY / scrollable));
+}
+const topicOpenAt = Date.now();
+let topicMaxProgress = 0;
+window.addEventListener('scroll', () => {
+    const p = topicScrollProgress();
+    if (p > topicMaxProgress) topicMaxProgress = p;
+}, { passive: true });
+
+let topicReported = false;
+function reportTopicBehavior() {
+    if (topicReported) return;
+    topicReported = true;
+    const payload = JSON.stringify({
+        progress: Math.max(topicMaxProgress, topicScrollProgress()),
+        dwell_ms: Date.now() - topicOpenAt,
+    });
+    navigator.sendBeacon(`/api/topics/{{$t.ID}}/behavior`, new Blob([payload], { type: 'application/json' }));
+}
+// 离开页面时上报（pagehide 覆盖导航/关闭/刷新，站内跳转同样触发）
+window.addEventListener('pagehide', reportTopicBehavior);
 </script>
 {{end}}
