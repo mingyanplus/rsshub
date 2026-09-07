@@ -483,7 +483,7 @@ async function fetchModels(target, btn) {
         const res = await fetch('/api/settings/models', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base_url: baseURL, api_key: apiKey }),
+            body: JSON.stringify({ base_url: baseURL, api_key: apiKey, target }),
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.message || '拉取失败');

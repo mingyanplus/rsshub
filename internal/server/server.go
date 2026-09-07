@@ -3061,11 +3061,24 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`<div class="p-4 bg-green-100 text-green-700 rounded-lg">✅ 设置已保存成功！</div>`))
 }
 
+// configuredUserAgent 返回设置页临时请求应继承的自定义 User-Agent
+// （配置在 config.yaml，设置表单无此字段）：embedding 用 Embedding 的，其余用 LLM 的
+func configuredUserAgent(target string) string {
+	if appConfig == nil {
+		return ""
+	}
+	if target == "embedding" {
+		return appConfig.AI.Embedding.UserAgent
+	}
+	return appConfig.AI.LLM.UserAgent
+}
+
 // FetchModels 拉取 LLM / Embedding 服务的模型列表（用表单草稿值，无需先保存）
 func FetchModels(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		BaseURL string `json:"base_url"`
 		APIKey  string `json:"api_key"`
+		Target  string `json:"target"` // llm / llm_fallback / embedding，决定继承哪个 User-Agent
 	}
 	respond := func(status int, ok bool, msg string, models []string) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -3090,6 +3103,10 @@ func FetchModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	// 继承配置里的自定义 User-Agent（表单无此字段；显式非空才设置，空值会抑制 Go 默认 UA）
+	if ua := configuredUserAgent(req.Target); ua != "" {
+		httpReq.Header.Set("User-Agent", ua)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(httpReq)
@@ -3174,10 +3191,11 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		client := ai.NewLLMClient(&config.LLMConfig{
-			BaseURL: strings.TrimRight(req.LLMBaseURL, "/"),
-			APIKey:  req.LLMAPIKey,
-			Model:   req.LLMModel,
-			Timeout: 30 * time.Second,
+			BaseURL:   strings.TrimRight(req.LLMBaseURL, "/"),
+			APIKey:    req.LLMAPIKey,
+			Model:     req.LLMModel,
+			Timeout:   30 * time.Second,
+			UserAgent: configuredUserAgent("llm"), // 继承配置里的自定义 User-Agent（表单无此字段）
 		})
 		ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 		defer cancel()
@@ -3197,10 +3215,11 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		client := ai.NewEmbeddingClient(&config.EmbeddingConfig{
-			BaseURL: strings.TrimRight(req.EmbeddingBaseURL, "/"),
-			APIKey:  req.EmbeddingAPIKey,
-			Model:   req.EmbeddingModel,
-			Timeout: 20 * time.Second,
+			BaseURL:   strings.TrimRight(req.EmbeddingBaseURL, "/"),
+			APIKey:    req.EmbeddingAPIKey,
+			Model:     req.EmbeddingModel,
+			Timeout:   20 * time.Second,
+			UserAgent: configuredUserAgent("embedding"), // 继承配置里的自定义 User-Agent（表单无此字段）
 		})
 		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 		defer cancel()
