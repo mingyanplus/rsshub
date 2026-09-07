@@ -317,7 +317,7 @@ func ParseAnalyzeResponse(response string) (*AnalyzeResult, error) {
 	response = ExtractJSONFromResponse(response)
 
 	var result AnalyzeResult
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
+	if err := UnmarshalLenient([]byte(response), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse analyze response: %w (response: %s)", err, response)
 	}
 

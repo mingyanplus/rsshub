@@ -156,6 +156,51 @@ func TestParseInvalidJSONResponse(t *testing.T) {
 	}
 }
 
+// LLM 偶发在字符串值内输出未转义引号（真实线上样例），修复后应能解析
+func TestParseAnalyzeResponseUnescapedQuotes(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+	}{
+		{
+			name: "中文值内嵌引号",
+			json: `{
+  "is_ad": false,
+  "summary": "小米将发布旗下首款"中折叠"手机小米18 Fold。",
+  "keywords": ["小米18 Fold"],
+  "importance_score": 7
+}`,
+		},
+		{
+			name: "英文短语引号+值尾引号",
+			json: `{
+  "is_ad": false,
+  "summary": "特斯拉宣布启动活动"Cybercab Japan Tour"，覆盖东京等四城。",
+  "keywords": ["特斯拉"],
+  "importance_score": 6
+}`,
+		},
+		{
+			name: "已转义引号不受影响",
+			json: `{
+  "is_ad": false,
+  "summary": "正常\"转义\"内容",
+  "keywords": []
+}`,
+		},
+	}
+	for _, tc := range cases {
+		result, err := ParseAnalyzeResponse(tc.json)
+		if err != nil {
+			t.Errorf("%s: ParseAnalyzeResponse() error = %v", tc.name, err)
+			continue
+		}
+		if result.IsAd {
+			t.Errorf("%s: IsAd should be false", tc.name)
+		}
+	}
+}
+
 func TestCalculateCosineSimilarity(t *testing.T) {
 	// 相同向量，相似度应为 1.0
 	vec1 := []float32{1.0, 0.0, 0.0}
