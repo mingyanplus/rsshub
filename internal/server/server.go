@@ -838,7 +838,7 @@ func RefreshFeed(w http.ResponseWriter, r *http.Request) {
 					publishedAt = &t
 				} else if t, err := time.Parse(time.RFC3339, item.Published); err == nil {
 					publishedAt = &t
-				} else if t, err := time.Parse("2006-01-02 15:04:05", item.Published); err == nil {
+				} else if t, err := time.ParseInLocation("2006-01-02 15:04:05", item.Published, time.Local); err == nil {
 					publishedAt = &t
 				}
 			}
@@ -5993,7 +5993,7 @@ func RefreshFeedInternal(feedID int64) error {
 					publishedAt = &t
 				} else if t, err := time.Parse(time.RFC3339, item.Published); err == nil {
 					publishedAt = &t
-				} else if t, err := time.Parse("2006-01-02 15:04:05", item.Published); err == nil {
+				} else if t, err := time.ParseInLocation("2006-01-02 15:04:05", item.Published, time.Local); err == nil {
 					publishedAt = &t
 				}
 			}

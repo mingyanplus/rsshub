@@ -25,7 +25,7 @@ func (d *DB) CreateFeed(feed *models.Feed) (int64, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO feeds (title, url, description, category_id, fetch_interval, is_active, source_type, source_config, content_filter, authority, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, feed.Title, feed.URL, feed.Description, feed.CategoryID, feed.FetchInterval, feed.IsActive, sourceType, sourceConfig, feed.ContentFilter, feed.NormalizeAuthority(), time.Now())
+	`, feed.Title, feed.URL, feed.Description, feed.CategoryID, feed.FetchInterval, feed.IsActive, sourceType, sourceConfig, feed.ContentFilter, feed.NormalizeAuthority(), sqlTime(time.Now()))
 	if err != nil {
 		return 0, err
 	}
@@ -105,7 +105,7 @@ func (d *DB) DeleteFeed(id int64) error {
 
 // UpdateFeedLastFetched 更新订阅源的最后抓取时间
 func (d *DB) UpdateFeedLastFetched(id int64) error {
-	_, err := d.db.Exec(`UPDATE feeds SET last_fetched_at = ? WHERE id = ?`, time.Now(), id)
+	_, err := d.db.Exec(`UPDATE feeds SET last_fetched_at = ? WHERE id = ?`, sqlTime(time.Now()), id)
 	return err
 }
 
@@ -124,7 +124,7 @@ func (d *DB) CreateArticle(article *models.Article) (int64, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO articles (feed_id, category_id, title, link, content, summary, ai_summary, content_cleaned, published_at, fetched_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, article.FeedID, article.CategoryID, article.Title, article.Link, article.Content, article.Summary, cleanSummary, cleanContent, publishedAt, time.Now())
+	`, article.FeedID, article.CategoryID, article.Title, article.Link, article.Content, article.Summary, cleanSummary, cleanContent, sqlTime(publishedAt), sqlTime(time.Now()))
 	if err != nil {
 		return 0, err
 	}
@@ -199,7 +199,7 @@ func (d *DB) CreateCategory(category *models.Category) (int64, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO categories (name, description, color, content_type, created_at)
 		VALUES (?, ?, ?, ?, ?)
-	`, category.Name, category.Description, category.Color, category.ContentType, time.Now())
+	`, category.Name, category.Description, category.Color, category.ContentType, sqlTime(time.Now()))
 	if err != nil {
 		return 0, err
 	}
@@ -261,7 +261,7 @@ func (d *DB) CreateTag(tag *models.Tag) (int64, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO tags (name, color, usage_count, created_at)
 		VALUES (?, ?, ?, ?)
-	`, tag.Name, tag.Color, tag.UsageCount, time.Now())
+	`, tag.Name, tag.Color, tag.UsageCount, sqlTime(time.Now()))
 	if err != nil {
 		return 0, err
 	}
@@ -861,7 +861,7 @@ func (d *DB) CreateFollowRule(rule *models.FollowRule) (int64, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO follow_rules (name, description, keywords, similarity_threshold, is_active, enable_push, push_channels, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, rule.Name, rule.Description, rule.Keywords, rule.SimilarityThreshold, rule.IsActive, rule.EnablePush, rule.PushChannels, time.Now())
+	`, rule.Name, rule.Description, rule.Keywords, rule.SimilarityThreshold, rule.IsActive, rule.EnablePush, rule.PushChannels, sqlTime(time.Now()))
 	if err != nil {
 		return 0, err
 	}
@@ -1023,8 +1023,9 @@ func (d *DB) GetStats() (map[string]int, error) {
 
 	var val int
 
-	// 今日文章数
-	d.db.QueryRow(`SELECT COUNT(*) FROM articles WHERE fetched_at >= date('now')`).Scan(&val)
+	// 今日文章数（按服务器本地时区的今日零点，fetched_at 为统一 UTC 文本）
+	todayStart := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Now().Location())
+	d.db.QueryRow(`SELECT COUNT(*) FROM articles WHERE fetched_at >= ?`, sqlTime(todayStart)).Scan(&val)
 	stats["today_articles"] = val
 
 	// 活跃订阅数
@@ -1216,7 +1217,7 @@ func (d *DB) GetArticlesForReport(since time.Time) ([]*models.Article, error) {
 		FROM articles
 		WHERE fetched_at >= ? AND is_ad = 0 AND embedding IS NOT NULL AND embedding != ''
 		ORDER BY importance_score DESC, published_at DESC
-	`, since)
+	`, sqlTime(since))
 	if err != nil {
 		return nil, err
 	}
@@ -1257,7 +1258,7 @@ func (d *DB) GetArticlesForReportBetween(startTime, endTime time.Time) ([]*model
 		FROM articles
 		WHERE fetched_at >= ? AND fetched_at < ? AND is_ad = 0 AND embedding IS NOT NULL AND embedding != ''
 		ORDER BY importance_score DESC, published_at DESC
-	`, startTime, endTime)
+	`, sqlTime(startTime), sqlTime(endTime))
 	if err != nil {
 		return nil, err
 	}
@@ -1316,7 +1317,7 @@ func (d *DB) SaveReport(report *models.Report) (int64, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO reports (name, type, schedule_time, channels, is_active, content, summary, article_count, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, report.Name, report.Type, scheduleTime, channels, isActive, report.Content, report.Summary, report.ArticleCount, time.Now())
+	`, report.Name, report.Type, scheduleTime, channels, isActive, report.Content, report.Summary, report.ArticleCount, sqlTime(time.Now()))
 	if err != nil {
 		log.Printf("SaveReport error: %v", err)
 		return 0, err
@@ -1465,7 +1466,7 @@ func (d *DB) ListReportsWithFilter(reportType string, limit, offset int) ([]*mod
 
 // UpdateReportSent 更新报告发送状态
 func (d *DB) UpdateReportSent(id int64) error {
-	_, err := d.db.Exec(`UPDATE reports SET sent_at = ? WHERE id = ?`, time.Now(), id)
+	_, err := d.db.Exec(`UPDATE reports SET sent_at = ? WHERE id = ?`, sqlTime(time.Now()), id)
 	return err
 }
 

@@ -37,6 +37,9 @@ func New(path string) (*DB, error) {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
 
+	// 统一历史时间列格式（不同时期/驱动写入混杂会使 SQL 文本比较失真）
+	d.normalizeTimeColumns()
+
 	return d, nil
 }
 

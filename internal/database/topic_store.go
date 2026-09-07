@@ -73,7 +73,7 @@ func (d *DB) CreateTopic(topic *models.Topic) (int64, error) {
 		INSERT INTO topics (title, ai_summary, entity_key, keywords, category, heat_score, article_count, source_count, embedding, status, first_article_at, last_updated_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
 	`, topic.Title, topic.AISummary, topic.EntityKey, topic.Keywords, topic.Category, topic.HeatScore,
-		topic.ArticleCount, topic.SourceCount, topic.Embedding, topic.FirstArticleAt, topic.LastUpdatedAt, time.Now())
+		topic.ArticleCount, topic.SourceCount, topic.Embedding, sqlTime(topic.FirstArticleAt), sqlTime(topic.LastUpdatedAt), sqlTime(time.Now()))
 	if err != nil {
 		return 0, err
 	}
@@ -87,7 +87,7 @@ func (d *DB) GetActiveTopicsForAggregation(window time.Duration) ([]*models.Topi
 		FROM topics
 		WHERE status = 'active' AND last_updated_at > ?
 		ORDER BY heat_score DESC
-	`, time.Now().Add(-window))
+	`, sqlTime(time.Now().Add(-window)))
 }
 
 // GetActiveTopicMemberVectors 批量获取活跃话题的成员文章向量（优先总结向量），
@@ -99,7 +99,7 @@ func (d *DB) GetActiveTopicMemberVectors(window time.Duration) (map[int64][][]by
 		JOIN articles a ON a.id = ta.article_id
 		JOIN topics t ON t.id = ta.topic_id
 		WHERE t.status = 'active' AND t.last_updated_at > ?
-	`, time.Now().Add(-window))
+	`, sqlTime(time.Now().Add(-window)))
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (d *DB) GetTopicArticleStats(topicID int64) (articleCount, sourceCount int,
 func (d *DB) UpdateTopicStats(topicID int64, articleCount, sourceCount int, heatScore float64, keywords string, embedding []byte) error {
 	_, err := d.db.Exec(`
 		UPDATE topics SET article_count = ?, source_count = ?, heat_score = ?, keywords = ?, embedding = ?, last_updated_at = ? WHERE id = ?
-	`, articleCount, sourceCount, heatScore, keywords, embedding, time.Now(), topicID)
+	`, articleCount, sourceCount, heatScore, keywords, embedding, sqlTime(time.Now()), topicID)
 	return err
 }
 
@@ -158,7 +158,7 @@ func (d *DB) UpdateTopicStats(topicID int64, articleCount, sourceCount int, heat
 func (d *DB) UpdateTopicSummary(topicID int64, summary string) error {
 	_, err := d.db.Exec(`
 		UPDATE topics SET ai_summary = ?, summary_updated_at = ? WHERE id = ?
-	`, summary, time.Now(), topicID)
+	`, summary, sqlTime(time.Now()), topicID)
 	return err
 }
 
@@ -205,7 +205,7 @@ func (d *DB) GetHotTopics(since time.Time, limit int) ([]*models.Topic, error) {
 		WHERE status != 'archived' AND last_updated_at > ?
 		ORDER BY heat_score DESC, last_updated_at DESC
 		LIMIT ?
-	`, since, limit)
+	`, sqlTime(since), limit)
 }
 
 // GetTopicArticles 获取话题下的文章（新加入的在前），带订阅源名称
@@ -314,7 +314,7 @@ func (d *DB) ListTopicsUpdatedBetween(startTime, endTime time.Time, limit int) (
 		WHERE status != 'archived' AND last_updated_at > ? AND last_updated_at <= ?
 		ORDER BY heat_score DESC, last_updated_at DESC
 		LIMIT ?
-	`, startTime, endTime, limit)
+	`, sqlTime(startTime), sqlTime(endTime), limit)
 }
 
 // GetRecentlyReportedTopicTitles 获取近期报告已覆盖的话题标题（反重复选题用）
@@ -328,7 +328,7 @@ func (d *DB) GetRecentlyReportedTopicTitles(startTime, endTime time.Time) ([]str
 		JOIN report_articles ra ON ra.article_id = ta.article_id
 		JOIN reports r ON r.id = ra.report_id
 		WHERE r.created_at > ? AND r.created_at < ?
-	`, startTime, endTime)
+	`, sqlTime(startTime), sqlTime(endTime))
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +365,7 @@ func (d *DB) ListRecentAnalyzedArticles(since time.Time) ([]int64, error) {
 		  AND ((summary_embedding IS NOT NULL AND length(summary_embedding) > 0)
 		    OR (embedding IS NOT NULL AND length(embedding) > 0))
 		ORDER BY fetched_at ASC
-	`, since, models.KeywordPlaceholderMarked, models.KeywordPlaceholderFiltered)
+	`, sqlTime(since), models.KeywordPlaceholderMarked, models.KeywordPlaceholderFiltered)
 	if err != nil {
 		return nil, err
 	}

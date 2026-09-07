@@ -128,6 +128,8 @@ func resolveURL(base, ref string) string {
 }
 
 // parseDate 尝试解析日期字符串
+// parseDate 解析日期字符串；无时区标记的格式按服务器本地时区解释
+// （Go 默认按 UTC，对国内源站的墙上时间会偏差 8 小时）
 func parseDate(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	formats := []string{
@@ -139,7 +141,7 @@ func parseDate(s string) (time.Time, error) {
 		"January 2, 2006",
 	}
 	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
+		if t, err := time.ParseInLocation(f, s, time.Local); err == nil {
 			return t, nil
 		}
 	}
