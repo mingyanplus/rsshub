@@ -1,10 +1,16 @@
 name: Release
 
-# 仅在推送新版本标签（v*）时触发：编译多平台二进制 + 构建推送 Docker 镜像
+# 推送 v* 标签：编译多平台二进制 + 构建推送 Docker 镜像（:版本号 + :latest）
+# 推送 main / feat 分支：仅构建 Docker 滚动标签 :edge（不发 Release，服务器可随时 pull :edge 更新）
+# 手动触发：Actions 页面选分支构建（镜像同样打 :edge）
 on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+      - 'feat/**'
+  workflow_dispatch:
 
 permissions:
   contents: write      # 创建 GitHub Release 并上传二进制
@@ -15,8 +21,9 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # ── 多平台二进制编译 + Release ─────────────────────────
+  # ── 多平台二进制编译 + Release（仅正式发版）─────────────
   binaries:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -58,7 +65,8 @@ jobs:
         with:
           files: dist/rss-ai-${{ github.ref_name }}-*
 
-  # ── Docker 镜像构建（amd64 + arm64）→ GHCR ────────────
+  # ── Docker 镜像构建（amd64）→ GHCR ─────────────────────
+  # tag 推送 → :版本号 + :latest；分支推送/手动触发 → :edge 滚动标签
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -73,6 +81,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute image tags & version
+        id: meta
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="$GITHUB_REF_NAME"
+            TAGS="$IMAGE:$GITHUB_REF_NAME
+          $IMAGE:latest"
+          else
+            VERSION="edge-${GITHUB_SHA::7}"
+            TAGS="$IMAGE:edge"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build & Push
         uses: docker/build-push-action@v6
         with:
@@ -80,10 +107,8 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
