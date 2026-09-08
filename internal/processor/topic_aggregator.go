@@ -316,7 +316,7 @@ func (a *TopicAggregator) refreshTopicSummary(topic *models.Topic) {
 		log.Printf("TopicAggregator: failed to refresh summary for topic %d (backoff %v): %v", topic.ID, summaryBackoff, err)
 		return
 	}
-	newSummary = strings.TrimSpace(stripMarkdownHeadings(newSummary))
+	newSummary = ai.StripMarkdownEmphasis(strings.TrimSpace(stripMarkdownHeadings(newSummary)))
 	if newSummary == "" {
 		return
 	}

@@ -204,7 +204,7 @@ func sourceLinks(arts []*models.Article, totalSources int) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("**来源:** ")
+	sb.WriteString("来源: ")
 	n := len(arts)
 	if n > 4 {
 		n = 4
@@ -237,7 +237,7 @@ func (g *ReportGenerator) generateTopicStory(topic *models.Topic) string {
 		log.Printf("话题故事生成失败（topic %d），使用话题摘要: %v", topic.ID, err)
 		return topic.AISummary
 	}
-	return strings.TrimSpace(stripMarkdownHeadings(story))
+	return ai.StripMarkdownEmphasis(strings.TrimSpace(stripMarkdownHeadings(story)))
 }
 
 // stripMarkdownHeadings 剥离 LLM 输出开头的 Markdown 标题行与空行
@@ -282,7 +282,7 @@ func buildTopicsReportContent(selected, briefs []*models.Topic, stories map[int6
 	if len(briefs) > 0 {
 		brief.WriteString("## 📰 快讯\n\n")
 		for i, t := range briefs {
-			brief.WriteString(fmt.Sprintf("%d. **%s** —— %s", i+1, t.Title, ellipsize(t.AISummary, 60)))
+			brief.WriteString(fmt.Sprintf("%d. %s —— %s", i+1, t.Title, ellipsize(t.AISummary, 60)))
 			if len(t.LatestArticles) > 0 {
 				brief.WriteString(fmt.Sprintf(" ｜[%s](%s)", t.LatestArticles[0].FeedTitle, t.LatestArticles[0].Link))
 			}
@@ -312,7 +312,7 @@ func buildTopicsReportContent(selected, briefs []*models.Topic, stories map[int6
 	if len(briefs) > 0 {
 		full.WriteString("## 📰 快讯\n\n")
 		for _, t := range briefs {
-			full.WriteString(fmt.Sprintf("- **%s**", t.Title))
+			full.WriteString(fmt.Sprintf("- %s", t.Title))
 			for j, art := range t.LatestArticles {
 				if j >= 2 {
 					break

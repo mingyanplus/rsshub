@@ -347,10 +347,10 @@ func (g *ReportGenerator) fallbackContent(cluster *models.ArticleCluster, isFeat
 		// 重点报道：只使用第一篇文章的内容，避免重复
 		a := cluster.Articles[0]
 		summary := getArticleSummary(a)
-		sb.WriteString(fmt.Sprintf("**%s**\n\n%s", a.Title, summary))
+		sb.WriteString(fmt.Sprintf("%s\n\n%s", a.Title, summary))
 
 		// 列出所有来源链接（使用序号格式，悬停显示标题）
-		sb.WriteString("\n\n**来源:** ")
+		sb.WriteString("\n\n来源: ")
 		for i, a := range cluster.Articles {
 			if i > 0 {
 				sb.WriteString(", ")
@@ -435,7 +435,7 @@ func (g *ReportGenerator) buildReportContent(featuredClusters, briefClusters []*
 			}
 			fullBuilder.WriteString(fmt.Sprintf("[查看原文](%s)\n\n---\n\n", article.Link))
 		} else {
-			fullBuilder.WriteString(fmt.Sprintf("- **%s** [%s](%s)\n", timeStr, article.Title, article.Link))
+			fullBuilder.WriteString(fmt.Sprintf("- %s [%s](%s)\n", timeStr, article.Title, article.Link))
 		}
 	}
 

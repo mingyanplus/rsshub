@@ -40,6 +40,9 @@ func New(path string) (*DB, error) {
 	// 统一历史时间列格式（不同时期/驱动写入混杂会使 SQL 文本比较失真）
 	d.normalizeTimeColumns()
 
+	// 清除存量标题/摘要中的 Markdown 加粗定界符（LLM 偶发输出，界面按纯文本展示）
+	d.stripMarkdownEmphasisInDB()
+
 	return d, nil
 }
 

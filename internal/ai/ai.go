@@ -311,6 +311,14 @@ func BuildAnalyzeUserPrompt(title, content string) string {
 	return fmt.Sprintf("文章标题：%s\n\n文章内容：\n%s", title, content)
 }
 
+// StripMarkdownEmphasis 清除字符串中的 Markdown 加粗定界符（**）。
+// LLM 偶发在 summary/one_line_summary/话题标题等纯文本字段输出 **xxx**，
+// 界面按纯文本展示导致星号裸露。只处理 **：不动 __（__init__ 等标识符）
+// 与单个 *（乘号等），避免破坏合法文本；正文/翻译等可能含代码的字段不应调用。
+func StripMarkdownEmphasis(s string) string {
+	return strings.ReplaceAll(s, "**", "")
+}
+
 // ParseAnalyzeResponse 解析 AI 分析响应
 func ParseAnalyzeResponse(response string) (*AnalyzeResult, error) {
 	// 使用公共函数提取 JSON
@@ -324,6 +332,21 @@ func ParseAnalyzeResponse(response string) (*AnalyzeResult, error) {
 	// 设置默认值
 	if result.ImportanceScore == 0 {
 		result.ImportanceScore = 5
+	}
+
+	// 纯文本展示字段脱 Markdown 加粗定界符
+	result.Summary = StripMarkdownEmphasis(result.Summary)
+	result.OneLineSummary = StripMarkdownEmphasis(result.OneLineSummary)
+	result.AdReason = StripMarkdownEmphasis(result.AdReason)
+	result.TopicCategory = StripMarkdownEmphasis(result.TopicCategory)
+	for i, v := range result.Keywords {
+		result.Keywords[i] = StripMarkdownEmphasis(v)
+	}
+	for i, v := range result.Tags {
+		result.Tags[i] = StripMarkdownEmphasis(v)
+	}
+	for i, v := range result.Entities {
+		result.Entities[i] = StripMarkdownEmphasis(v)
 	}
 
 	return &result, nil

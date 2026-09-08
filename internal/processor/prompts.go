@@ -3,6 +3,7 @@ package processor
 import (
 	"fmt"
 	"regexp"
+	"rss-ai/internal/ai"
 	"rss-ai/internal/models"
 	"strings"
 )
@@ -204,26 +205,27 @@ type BriefReportJSON struct {
 	Source  string `json:"source"`
 }
 
-// FormatFeaturedReport 格式化重点报道（JSON → Markdown）
+// FormatFeaturedReport 格式化重点报道（JSON → Markdown；LLM 输出字段脱 ** 定界符，
+// 报告经纯文本渠道推送时星号会裸露）
 func FormatFeaturedReport(report *FeaturedReportJSON, articles []*models.Article) string {
 	var sb strings.Builder
 
-	fmt.Fprintf(&sb, "%s\n\n", report.Content)
+	fmt.Fprintf(&sb, "%s\n\n", ai.StripMarkdownEmphasis(report.Content))
 
 	if len(report.KeyPoints) > 0 {
-		sb.WriteString("**要点：**\n\n")
+		sb.WriteString("要点：\n\n")
 		for _, p := range report.KeyPoints {
-			fmt.Fprintf(&sb, "- %s\n", p)
+			fmt.Fprintf(&sb, "- %s\n", ai.StripMarkdownEmphasis(p))
 		}
 		sb.WriteString("\n")
 	}
 
 	if report.Insight != "" {
-		fmt.Fprintf(&sb, "**洞察：** %s\n\n", report.Insight)
+		fmt.Fprintf(&sb, "洞察：%s\n\n", ai.StripMarkdownEmphasis(report.Insight))
 	}
 
 	if len(articles) > 0 {
-		sb.WriteString("**来源:** ")
+		sb.WriteString("来源: ")
 		for i, a := range articles {
 			if i > 0 {
 				sb.WriteString(" | ")
@@ -238,18 +240,16 @@ func FormatFeaturedReport(report *FeaturedReportJSON, articles []*models.Article
 	return sb.String()
 }
 
-// FormatBriefReport 格式化简讯（JSON → Markdown）
-
-// FormatBriefReport 格式化简讯（JSON → Markdown）
+// FormatBriefReport 格式化简讯（JSON → Markdown；LLM 输出字段脱 ** 定界符）
 func FormatBriefReport(report *BriefReportJSON, articles []*models.Article) string {
 	var sb strings.Builder
 
-	fmt.Fprintf(&sb, "- **%s** %s", report.Title, report.Content)
+	fmt.Fprintf(&sb, "- %s %s", ai.StripMarkdownEmphasis(report.Title), ai.StripMarkdownEmphasis(report.Content))
 	if report.Insight != "" {
-		fmt.Fprintf(&sb, "\n **洞察：** %s", report.Insight)
+		fmt.Fprintf(&sb, "\n 洞察：%s", ai.StripMarkdownEmphasis(report.Insight))
 	}
 	if len(articles) > 0 {
-		sb.WriteString("\n **来源：** ")
+		sb.WriteString("\n 来源：")
 		for i, a := range articles {
 			if i > 0 {
 				sb.WriteString(" ")

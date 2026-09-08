@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,7 +285,7 @@ func TestLLMFallbackModel(t *testing.T) {
 		c := NewLLMClient(&config.LLMConfig{
 			BaseURL: srv.URL, APIKey: "k", Model: "main-model",
 			Fallback: config.LLMFallbackConfig{Model: "backup-model"}, // base_url/key 留空沿用主配置
-			Timeout: 5 * time.Second, MaxRetries: 2,
+			Timeout:  5 * time.Second, MaxRetries: 2,
 		})
 		got, err := c.Chat(context.Background(), "hi")
 		if err != nil {
@@ -303,7 +304,7 @@ func TestLLMFallbackModel(t *testing.T) {
 		c := NewLLMClient(&config.LLMConfig{
 			BaseURL: mainSrv.URL, APIKey: "k", Model: "main-model",
 			Fallback: config.LLMFallbackConfig{BaseURL: backupSrv.URL, APIKey: "k2", Model: "backup-model"},
-			Timeout: 5 * time.Second, MaxRetries: 2,
+			Timeout:  5 * time.Second, MaxRetries: 2,
 		})
 		got, err := c.Chat(context.Background(), "hi")
 		if err != nil {
@@ -325,4 +326,46 @@ func TestLLMFallbackModel(t *testing.T) {
 			t.Fatal("Chat() should fail without fallback")
 		}
 	})
+}
+
+// LLM 偶发在纯文本字段输出 **加粗** 定界符，界面裸露星号——解析后应统一脱除
+func TestParseAnalyzeResponseStripsMarkdownEmphasis(t *testing.T) {
+	resp := `{
+		"summary": "**OpenAI** 发布了新模型 **o5**，性能大幅提升",
+		"one_line_summary": "**OpenAI 发布 o5**，性能提升",
+		"ad_reason": "推广**付费课程**",
+		"topic_category": "**AI 动态**",
+		"keywords": ["**OpenAI**", "o5"],
+		"tags": ["**模型发布**"],
+		"entities": ["**OpenAI**"],
+		"importance_score": 8
+	}`
+	res, err := ParseAnalyzeResponse(resp)
+	if err != nil {
+		t.Fatalf("ParseAnalyzeResponse() error = %v", err)
+	}
+	if res.Summary != "OpenAI 发布了新模型 o5，性能大幅提升" {
+		t.Errorf("Summary = %q", res.Summary)
+	}
+	if res.OneLineSummary != "OpenAI 发布 o5，性能提升" {
+		t.Errorf("OneLineSummary = %q", res.OneLineSummary)
+	}
+	if res.AdReason != "推广付费课程" {
+		t.Errorf("AdReason = %q", res.AdReason)
+	}
+	if res.TopicCategory != "AI 动态" {
+		t.Errorf("TopicCategory = %q", res.TopicCategory)
+	}
+	for _, list := range [][]string{res.Keywords, res.Tags, res.Entities} {
+		for _, v := range list {
+			if strings.Contains(v, "**") {
+				t.Errorf("list item %q still contains **", v)
+			}
+		}
+	}
+	// 合法文本不受影响：__init__、乘号、单星
+	keep := StripMarkdownEmphasis("Python __init__ 与 3*4 和 a*b")
+	if keep != "Python __init__ 与 3*4 和 a*b" {
+		t.Errorf("StripMarkdownEmphasis() = %q, want unchanged", keep)
+	}
 }
