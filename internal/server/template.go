@@ -97,3 +97,22 @@ func renderTemplate(w http.ResponseWriter, name string, data PageData) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
+
+// renderTemplateBlock 渲染模板中的指定内容块（不带 layout，话题流分栏预览等局部加载用）
+func renderTemplateBlock(w http.ResponseWriter, name, block string, data PageData) {
+	if templateDir == "" {
+		http.Error(w, "模板未加载", http.StatusInternalServerError)
+		return
+	}
+
+	tmpl, err := template.New("").Funcs(templateFuncs).ParseFiles(filepath.Join(templateDir, name+".html"))
+	if err != nil {
+		http.Error(w, "模板加载失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, block, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}

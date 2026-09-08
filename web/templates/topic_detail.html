@@ -1,7 +1,11 @@
 {{template "layout" .}}
-{{define "content"}}
+{{define "topic-detail-content"}}
 {{$t := .TopicDetail}}
+{{if .TopicPartial}}
+<div class="space-y-5">
+{{else}}
 <div class="max-w-3xl mx-auto lg:mx-0 space-y-5">
+{{end}}
     <!-- 话题主体 -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h1 class="text-2xl font-bold text-gray-900 leading-tight">{{$t.Title}}</h1>
@@ -73,7 +77,7 @@
     </div>
     {{end}}
 
-    <a href="/topics" class="inline-block text-sm text-gray-400 hover:text-blue-500">← 返回话题流</a>
+    {{if not .TopicPartial}}<a href="/topics" class="inline-block text-sm text-gray-400 hover:text-blue-500">← 返回话题流</a>{{end}}
 </div>
 
 <script>
@@ -99,6 +103,8 @@ async function convertToEvent(topicID) {
 }
 
 // ========== 话题阅读行为埋点（深度阅读 → 兴趣画像弱正反馈） ==========
+// 分栏预览模式（TopicPartial）下不生效：滚动发生在预览容器内、由话题流页面统一上报
+{{if not .TopicPartial}}
 // 整页滚动进度：内容不足一屏视为已读完
 function topicScrollProgress() {
     const doc = document.documentElement;
@@ -125,5 +131,7 @@ function reportTopicBehavior() {
 }
 // 离开页面时上报（pagehide 覆盖导航/关闭/刷新，站内跳转同样触发）
 window.addEventListener('pagehide', reportTopicBehavior);
+{{end}}
 </script>
 {{end}}
+{{define "content"}}{{template "topic-detail-content" .}}{{end}}

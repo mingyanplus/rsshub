@@ -1,8 +1,8 @@
 {{template "layout" .}}
 {{define "content"}}
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- 主栏：话题流 -->
-    <div class="lg:col-span-2 space-y-4">
+<div class="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-6">
+    <!-- 左栏：话题列表 -->
+    <div class="space-y-4 min-w-0">
         <!-- 频道筛选 -->
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-3 flex items-center gap-2 flex-wrap">
             <a href="/topics"
@@ -17,32 +17,23 @@
             </button>
         </div>
 
-        <!-- 话题卡片 -->
+        <!-- 话题列表（桌面端点击在右侧预览，移动端跳转详情页） -->
         {{range .TopicList}}
-        <article class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+        <article class="topic-card bg-white rounded-xl shadow-sm border border-gray-100 p-4 cursor-pointer transition hover:border-gray-300"
+                 data-topic-id="{{.ID}}" onclick="topicCardClick(event, {{.ID}})">
             <div class="flex items-start justify-between gap-3">
-                <a href="/topics/{{.ID}}" class="text-lg font-semibold text-gray-900 hover:text-blue-600 hover:underline decoration-gray-300 underline-offset-4 leading-snug">{{.Title}}</a>
-                <span class="flex-shrink-0 text-xs text-gray-400 mt-1.5 tabular-nums tracking-wide">{{reltime .LastUpdatedAt}}</span>
+                <a href="/topics/{{.ID}}" class="text-[15px] font-semibold text-gray-900 hover:text-blue-600 leading-snug">{{.Title}}</a>
+                <span class="flex-shrink-0 text-xs text-gray-400 mt-0.5 tabular-nums tracking-wide">{{reltime .LastUpdatedAt}}</span>
             </div>
-            <div class="flex items-center gap-2 mt-2.5 text-xs flex-wrap">
+            <div class="flex items-center gap-2 mt-2 text-xs flex-wrap">
                 {{if .Category}}
                 <span class="bg-blue-50 text-blue-600 px-2 py-0.5 rounded">{{.Category}}</span>
                 {{end}}
-                <span class="text-gray-400 tabular-nums">{{.SourceCount}} 个来源 · {{.ArticleCount}} 篇报道</span>
+                <span class="text-gray-400 tabular-nums">{{.SourceCount}} 源 · {{.ArticleCount}} 篇</span>
                 <span class="text-orange-500 tabular-nums ml-auto font-mono text-xs">🔥 {{.HeatScore}}</span>
             </div>
             {{if .AISummary}}
-            <p class="text-[15px] text-gray-600 mt-3.5 leading-7">{{.AISummary}}</p>
-            {{end}}
-            {{if .LatestArticles}}
-            <div class="mt-3.5 space-y-2 border-l border-gray-200 pl-4">
-                {{range .LatestArticles}}
-                <a href="{{.Link}}" target="_blank" rel="noopener" class="flex items-baseline gap-2 group">
-                    <span class="text-sm text-gray-700 group-hover:text-blue-600 flex-1 truncate">{{.Title}}</span>
-                    <span class="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">{{.FeedTitle}}{{if .PublishedAt}} · {{reltime .PublishedAt}}{{end}}</span>
-                </a>
-                {{end}}
-            </div>
+            <p class="text-sm text-gray-600 mt-2.5 leading-6 line-clamp-2">{{.AISummary}}</p>
             {{end}}
         </article>
         {{else}}
@@ -69,35 +60,165 @@
             {{end}}
         </div>
         {{end}}
-    </div>
-
-    <!-- 侧栏 -->
-    <div class="space-y-4">
-        <!-- 24 小时热榜 -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
-            <div class="p-4 border-b border-gray-100 font-semibold text-gray-800 flex items-center gap-2">
-                <svg class="w-4 h-4 text-orange-500" aria-hidden="true"><use href="#i-fire"/></svg> 24 小时热榜
-            </div>
-            <div class="p-2 space-y-0.5">
-                {{range $i, $t := .HotTopics24h}}
-                <a href="/topics/{{$t.ID}}" class="flex items-start gap-2.5 px-2 py-2.5 hover:bg-gray-50 rounded-lg transition">
-                    <span class="text-sm font-bold w-6 flex-shrink-0 text-center font-mono tabular-nums {{if lt $i 3}}text-orange-500{{else}}text-gray-300{{end}}">{{add $i 1}}</span>
-                    <span class="text-sm text-gray-700 leading-snug">{{$t.Title}}</span>
-                </a>
-                {{else}}
-                <p class="text-sm text-gray-400 text-center py-4">暂无数据</p>
-                {{end}}
-            </div>
-        </div>
 
         <!-- 说明卡片 -->
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-xs text-gray-400 leading-relaxed">
             <p class="font-medium text-gray-500 mb-1">关于话题流</p>
-            <p>同一事件的多篇报道会自动聚合为一个话题，并生成综合摘要；点击标题可查看全部相关新闻与该话题主体的历史时间线。</p>
+            <p>同一事件的多篇报道会自动聚合为一个话题，并生成综合摘要；点击话题可在右侧查看全部相关新闻与该话题主体的历史时间线。</p>
+        </div>
+    </div>
+
+    <!-- 右栏：话题预览（桌面端；点击左侧话题原地展示，无需跳页） -->
+    <div class="hidden lg:block">
+        <div id="topic-preview"
+             class="sticky top-20 h-[calc(100vh-6.5rem)] overflow-y-auto rounded-xl border border-gray-100 bg-white shadow-sm p-5">
+            <div class="h-full flex flex-col items-center justify-center text-gray-300 gap-2">
+                <svg class="w-10 h-10" aria-hidden="true"><use href="#i-fire"/></svg>
+                <p class="text-sm">点击左侧话题，在此预览详情</p>
+                <p class="text-xs text-gray-200">话题主体 · 相关新闻 · 历史时间线</p>
+            </div>
         </div>
     </div>
 </div>
 
+<!-- 话题详情弹窗（手机端底部抽屉；桌面端用右侧预览面板，不弹窗） -->
+<div id="topic-modal" class="hidden fixed inset-0 bg-black/50 lg:hidden z-40 flex items-end">
+    <div class="bg-white w-full max-h-[88vh] rounded-t-2xl shadow-xl flex flex-col overflow-hidden">
+        <div class="p-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+            <h3 class="font-semibold text-gray-800">话题详情</h3>
+            <button onclick="closeTopicModal()" aria-label="关闭" class="text-gray-400 hover:text-gray-600 p-1 -mr-1">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div id="topic-modal-content" class="flex-1 overflow-y-auto p-5">
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== 话题分栏预览（桌面右栏面板 / 手机底部弹窗，同一份数据与埋点口径） =====
+const topicPreview = document.getElementById('topic-preview');
+const topicModal = document.getElementById('topic-modal');
+const topicModalContent = document.getElementById('topic-modal-content');
+const isDesktop = () => window.matchMedia('(min-width: 1024px)').matches;
+
+// 当前预览中的话题（阅读行为埋点：滚动进度 + 停留时长，与详情页同口径）
+// el 为当前承载内容的滚动容器（桌面右栏面板 / 手机弹窗内容区）
+let curTopic = null;
+
+function progressOf(el) {
+    const scrollable = el.scrollHeight - el.clientHeight;
+    if (scrollable <= 0) return 1;
+    return Math.min(1, Math.max(0, el.scrollTop / scrollable));
+}
+[topicPreview, topicModalContent].forEach(el => el.addEventListener('scroll', () => {
+    if (curTopic && curTopic.el === el) {
+        const p = progressOf(el);
+        if (p > curTopic.maxProgress) curTopic.maxProgress = p;
+    }
+}, { passive: true }));
+
+function reportPreviewBehavior() {
+    if (!curTopic) return;
+    const t = curTopic;
+    curTopic = null;
+    const payload = JSON.stringify({
+        progress: Math.max(t.maxProgress, progressOf(t.el)),
+        dwell_ms: Date.now() - t.openAt,
+    });
+    navigator.sendBeacon(`/api/topics/${t.id}/behavior`, new Blob([payload], { type: 'application/json' }));
+}
+window.addEventListener('pagehide', reportPreviewBehavior);
+
+// innerHTML 注入的 script 不会执行，需替换为新节点激活（转事件按钮等）
+function activateScripts(container) {
+    container.querySelectorAll('script').forEach(old => {
+        const s = document.createElement('script');
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+    });
+}
+
+function selectTopicCard(id) {
+    document.querySelectorAll('.topic-card').forEach(el => {
+        el.classList.toggle('selected-topic', el.dataset.topicId === String(id));
+    });
+}
+
+// URL 同步选中话题（保留列表筛选参数），刷新后可恢复；id 为 null 时移除
+function syncTopicUrl(id) {
+    const params = new URLSearchParams(location.search);
+    if (id == null) params.delete('t'); else params.set('t', id);
+    const qs = params.toString();
+    history.replaceState(null, '', `/topics${qs ? '?' + qs : ''}`);
+}
+
+async function openTopicPreview(id) {
+    reportPreviewBehavior(); // 先上报上一个话题的阅读行为
+    selectTopicCard(id);
+    syncTopicUrl(id);
+    const mobile = !isDesktop();
+    const target = mobile ? topicModalContent : topicPreview;
+    if (mobile) {
+        target.innerHTML = '<div class="flex items-center justify-center py-8"><div class="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent"></div></div>';
+        topicModal.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden'); // 锁定背景滚动
+    } else {
+        target.innerHTML = '<div class="h-full flex items-center justify-center text-gray-300 text-sm">加载中…</div>';
+    }
+    try {
+        const res = await fetch(`/topics/${id}?partial=1`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        target.innerHTML = await res.text();
+        activateScripts(target);
+        target.scrollTop = 0;
+        curTopic = { id, openAt: Date.now(), maxProgress: 0, el: target };
+    } catch (err) {
+        target.innerHTML = `<div class="flex flex-col items-center justify-center text-gray-400 gap-2 text-sm ${mobile ? 'py-8' : 'h-full'}">
+            <span>加载失败：${err.message}</span>
+            <a href="/topics/${id}" class="no-intercept text-blue-500 hover:underline">跳转详情页查看</a></div>`;
+    }
+}
+
+function closeTopicModal() {
+    reportPreviewBehavior();
+    topicModal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+    syncTopicUrl(null); // 手机端关闭即结束阅读，清除恢复参数
+}
+
+function topicCardClick(e, id) {
+    e.preventDefault(); // 手机端弹窗、桌面右栏预览，均不再跳页
+    openTopicPreview(id);
+}
+
+// 预览内容里的站内话题链接（历史时间线等）改为原地切换预览；no-intercept 放行（如失败兜底链接）
+[topicPreview, topicModalContent].forEach(el => el.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="/topics/"]');
+    if (!a || a.classList.contains('no-intercept')) return;
+    const m = a.getAttribute('href').match(/^\/topics\/(\d+)$/);
+    if (!m) return;
+    e.preventDefault();
+    openTopicPreview(m[1]);
+}));
+
+// 手机端弹窗：ESC / 点遮罩关闭
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !topicModal.classList.contains('hidden')) closeTopicModal();
+});
+topicModal.addEventListener('click', e => { if (e.target === topicModal) closeTopicModal(); });
+
+// 刷新后恢复选中话题（桌面右栏预览 / 手机端自动弹出）
+document.addEventListener('DOMContentLoaded', () => {
+    const t = new URLSearchParams(location.search).get('t');
+    if (t && /^\d+$/.test(t)) openTopicPreview(t);
+});
+</script>
+<style>
+.topic-card.selected-topic { border-color: #1a6b3c; background: #f0f7f2; }
+</style>
 <script>
 // 从存量文章重建话题（异步，需数分钟）
 async function rebuildTopics(btn) {

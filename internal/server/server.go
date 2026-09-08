@@ -191,8 +191,9 @@ type PageData struct {
 	TopicDetail     *models.Topic
 	TopicArticles   []*models.Article
 	RelatedTopics   []*models.Topic
-	HotTopics24h    []*models.Topic
 	TopicCategories []string
+	// TopicPartial 话题详情按局部片段渲染（话题流分栏预览，无 layout）
+	TopicPartial bool
 	// 分页
 	CurrentPage int
 	TotalPages  int
@@ -3877,9 +3878,7 @@ func TopicsPage(w http.ResponseWriter, r *http.Request) {
 		data.NextPage = page + 1
 		data.SelectedCategory = category
 
-		if hot, err := appDB.GetHotTopics(time.Now().Add(-processor.HotTopicsWindow), 10); err == nil {
-			data.HotTopics24h = hot
-		}
+		// 24 小时热榜已收敛至仪表盘（热门话题卡片，同源 GetHotTopics）
 		if cats, err := appDB.GetTopicCategories(); err == nil {
 			data.TopicCategories = cats
 		}
@@ -3951,6 +3950,8 @@ func TopicDetailPage(w http.ResponseWriter, r *http.Request) {
 		PageTitle:   "话题详情",
 		Active:      "topics",
 		TopicDetail: topic,
+		// partial=1：仅渲染内容片段，供话题流分栏预览面板嵌入
+		TopicPartial: r.URL.Query().Get("partial") == "1",
 	}
 
 	if articles, err := appDB.GetTopicArticles(id, 100, 0); err == nil {
@@ -3960,6 +3961,10 @@ func TopicDetailPage(w http.ResponseWriter, r *http.Request) {
 		data.RelatedTopics = related
 	}
 
+	if data.TopicPartial {
+		renderTemplateBlock(w, "topic_detail", "topic-detail-content", data)
+		return
+	}
 	renderTemplate(w, "topic_detail", data)
 }
 
