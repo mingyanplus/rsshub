@@ -39,6 +39,8 @@ type Analyzer struct {
 	embRateLimit    time.Duration // Embedding API 调用间隔
 	lastLLMCall     time.Time     // 上次 LLM 调用时间
 	lastEmbCall     time.Time     // 上次 Embedding 调用时间
+	llmMu           sync.Mutex    // LLM 限速锁（并发分析下保证全局限速）
+	embMu           sync.Mutex    // Embedding 限速锁
 
 	promptMu             sync.RWMutex
 	analyzeSysOverride   string // 文章分析 system 提示词覆盖（空=内置默认）
@@ -122,18 +124,25 @@ func (a *Analyzer) SetProxy(proxyURL string, enableLLM bool) {
 	a.embeddingClient.SetProxy(url)
 }
 
-// waitForRateLimit 等待速率限制
+// waitForRateLimit 等待速率限制（加锁：并发调用时按 interval 间隔依次放行，
+// 实际请求在锁外并发执行；sleep 持锁保证多个等待者排队而非同时放行）
 func (a *Analyzer) waitForRateLimit(isLLM bool) {
+	var mu *sync.Mutex
 	var lastCall *time.Time
 	var interval time.Duration
 
 	if isLLM {
+		mu = &a.llmMu
 		lastCall = &a.lastLLMCall
 		interval = a.llmRateLimit
 	} else {
+		mu = &a.embMu
 		lastCall = &a.lastEmbCall
 		interval = a.embRateLimit
 	}
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	if !lastCall.IsZero() {
 		elapsed := time.Since(*lastCall)
@@ -142,12 +151,7 @@ func (a *Analyzer) waitForRateLimit(isLLM bool) {
 		}
 	}
 
-	now := time.Now()
-	if isLLM {
-		a.lastLLMCall = now
-	} else {
-		a.lastEmbCall = now
-	}
+	*lastCall = time.Now()
 }
 
 // AnalyzeArticle 分析文章（两阶段：内容分析 + 条件翻译）

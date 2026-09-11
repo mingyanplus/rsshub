@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -330,7 +331,9 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 
 			case <-aiTicker.C:
 				logger.Debug("Scheduled AI processing...")
-				processPendingArticles(db)
+				// 异步执行：批量分析耗时可能超过 tick 间隔，同步执行会阻塞整个
+				// 调度循环（RSS 刷新/早晚报/热点检测全部停摆）且丢弃错过的 tick
+				go processPendingArticles(db)
 
 			case <-reportCheckTicker.C:
 				// 检查是否需要生成早晚报
@@ -450,9 +453,18 @@ func refreshAllFeeds(db *database.DB) error {
 }
 
 // processPendingArticles 处理待分析的文章（包括未处理和不完整的）
+// aiProcessingRunning 防止上一轮批量分析未结束时重叠启动新一轮（浪费 API 配额且日志混乱）
+var aiProcessingRunning atomic.Bool
+
 func processPendingArticles(db *database.DB) {
+	if !aiProcessingRunning.CompareAndSwap(false, true) {
+		logger.Debug("AI processing already running, skipping this tick")
+		return
+	}
+	defer aiProcessingRunning.Store(false)
+
 	// 1. 先处理未处理的文章
-	articles, err := db.GetUnprocessedArticles(20)
+	articles, err := db.GetUnprocessedArticles(100)
 	if err != nil {
 		logger.Error("Failed to get unprocessed articles: %v", err)
 	} else if len(articles) > 0 {
@@ -461,7 +473,7 @@ func processPendingArticles(db *database.DB) {
 	}
 
 	// 2. 然后处理不完整的文章（缺少 entities/one_line_summary/summary_embedding）
-	incompleteArticles, err := db.GetArticlesIncomplete(20)
+	incompleteArticles, err := db.GetArticlesIncomplete(50)
 	if err != nil {
 		logger.Error("Failed to get incomplete articles: %v", err)
 		return

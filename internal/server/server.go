@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -6052,28 +6053,51 @@ func RefreshFeedInternal(feedID int64) error {
 	return nil
 }
 
+// aiAnalysisWorkers 后台批量分析的并发数（API 限速由 Analyzer 内部全局限速器保证，
+// worker 只决定同时在途的请求数；调大仅提升吞吐，不会突破 LLMInterval 节流）
+const aiAnalysisWorkers = 4
+
+// processArticlesConcurrent 以固定并发数处理文章列表（取代旧的串行 + sleep 模式）
+func processArticlesConcurrent(articles []*models.Article, process func(article *models.Article)) {
+	sem := make(chan struct{}, aiAnalysisWorkers)
+	var wg sync.WaitGroup
+	for _, article := range articles {
+		wg.Add(1)
+		sem <- struct{}{} // 满员时阻塞提交（背压）
+		go func(a *models.Article) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			process(a)
+		}(article)
+	}
+	wg.Wait()
+}
+
 // ProcessPendingArticlesInternal 内部处理待分析文章（供调度器调用）
 func ProcessPendingArticlesInternal(articles []*models.Article) {
 	if appAnalyzer == nil || len(articles) == 0 {
 		return
 	}
 
-	articleInterval := 2 * time.Second
-	if appConfig != nil {
-		articleInterval = appConfig.AI.RateLimit.ArticleInterval
-	}
-
-	for i, article := range articles {
-		if i > 0 {
-			time.Sleep(articleInterval)
-		}
-
+	processArticlesConcurrent(articles, func(article *models.Article) {
 		text := article.Content
 		if text == "" {
 			text = article.Summary
 		}
 		if text == "" {
-			continue
+			// 无任何文本的文章直接标记为已处理：否则 keywords 恒空，
+			// 会永久霸占未处理队列头部（fetched_at ASC），挤占后续文章的处理名额
+			fmt.Printf("Article %d has no text content, marking as processed\n", article.ID)
+			appDB.UpdateArticleAI(&models.AIUpdateParams{
+				ID:             article.ID,
+				AISummary:      "文章无正文内容，无法分析",
+				OneLineSummary: "无内容文章",
+				Keywords:       "已标记",
+				Entities:       "无",
+				TopicCategory:  "无内容",
+				ImportanceScore: 1,
+			})
+			return
 		}
 
 		if len(text) > 4000 {
@@ -6081,7 +6105,7 @@ func ProcessPendingArticlesInternal(articles []*models.Article) {
 		}
 
 		analyzeArticleAsync(article.ID, article.Title, text, "")
-	}
+	})
 
 	fmt.Printf("Processed %d pending articles\n", len(articles))
 }
@@ -6092,22 +6116,13 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 		return
 	}
 
-	articleInterval := 2 * time.Second
-	if appConfig != nil {
-		articleInterval = appConfig.AI.RateLimit.ArticleInterval
-	}
-
-	for i, article := range articles {
-		if i > 0 {
-			time.Sleep(articleInterval)
-		}
-
+	processArticlesConcurrent(articles, func(article *models.Article) {
 		text := article.Content
 		if text == "" {
 			text = article.Summary
 		}
 		if text == "" {
-			continue
+			return
 		}
 
 		if len(text) > 4000 {
@@ -6115,20 +6130,25 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
 
-		// 检查文章缺少哪些字段
+		// 检查文章缺少哪些字段（entities/summary_embedding 已由查询取到真实值）
 		needsReanalyze := article.OneLineSummary == "" || article.Entities == ""
 		needsEmbedding := len(article.SummaryEmbedding) == 0 && article.OneLineSummary != ""
+
+		// 防御：所有字段齐全则跳过，避免队列条件与判断字段不一致时陷入重复分析循环
+		if !needsReanalyze && !needsEmbedding {
+			return
+		}
 
 		// 如果只需要生成向量（已有 one_line_summary）
 		if needsEmbedding && !needsReanalyze && article.OneLineSummary != "" {
 			summaryEmb, err := appAnalyzer.GetEmbedding(ctx, article.OneLineSummary)
 			if err == nil {
 				appDB.UpdateArticleSummaryEmbedding(article.ID, summaryEmb)
-				fmt.Printf("Generated summary embedding for incomplete article %d (%d/%d)\n", article.ID, i+1, len(articles))
+				fmt.Printf("Generated summary embedding for incomplete article %d\n", article.ID)
 			}
-			cancel()
-			continue
+			return
 		}
 
 		// 需要重新 AI 分析
@@ -6136,8 +6156,7 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 		if err != nil {
 			fmt.Printf("Failed to reanalyze incomplete article %d: %v\n", article.ID, err)
 			appDB.IncrementProcessAttempts(article.ID, err.Error())
-			cancel()
-			continue
+			return
 		}
 
 		// 更新文章 AI 分析结果
@@ -6159,8 +6178,7 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 			TranslatedContent: result.TranslatedContent,
 		}); err != nil {
 			fmt.Printf("Failed to update incomplete article AI data %d: %v\n", article.ID, err)
-			cancel()
-			continue
+			return
 		}
 
 		// 生成总结向量
@@ -6171,9 +6189,8 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 			}
 		}
 
-		cancel()
-		fmt.Printf("Reanalyzed incomplete article %d (%d/%d)\n", article.ID, i+1, len(articles))
-	}
+		fmt.Printf("Reanalyzed incomplete article %d\n", article.ID)
+	})
 
 	fmt.Printf("Processed %d incomplete articles\n", len(articles))
 }

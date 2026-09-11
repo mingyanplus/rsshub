@@ -429,20 +429,21 @@ func (d *DB) GetArticlesByQueryType(queryType ArticleQueryType, limit int) ([]*m
 	case QueryIncomplete:
 		// 已处理但缺少 entities、one_line_summary 或 summary_embedding 的文章
 		// 排除广告文章
+		// 注意：不含 translated_content——翻译仅对非中文内容生成，中文文章该列恒空，
+		// 若纳入条件会导致中文文章永久留在队列中被反复重新分析（无限循环）
 		whereClause = `(is_ad = 0 OR is_ad IS NULL)
 		  AND (keywords IS NOT NULL AND keywords != '' AND keywords != '[]')
 		  AND (
 		    (entities IS NULL OR entities = '')
 		    OR (one_line_summary IS NULL OR one_line_summary = '')
 		    OR (summary_embedding IS NULL OR summary_embedding = '')
-		    OR (translated_content IS NULL OR translated_content = '')
 		  )`
 	default:
 		return nil, fmt.Errorf("unknown query type: %d", queryType)
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, feed_id, category_id, title, link, content, content_cleaned, summary, ai_summary, one_line_summary, keywords, tags_cache, is_ad, ad_reason, published_at, fetched_at
+		SELECT id, feed_id, category_id, title, link, content, content_cleaned, summary, ai_summary, one_line_summary, keywords, tags_cache, is_ad, ad_reason, entities, summary_embedding, published_at, fetched_at
 		FROM articles
 		WHERE %s
 		ORDER BY fetched_at DESC
@@ -463,10 +464,10 @@ func (d *DB) scanArticlesWithOneLineSummary(rows *sql.Rows) ([]*models.Article, 
 	var articles []*models.Article
 	for rows.Next() {
 		article := &models.Article{}
-		var contentCleaned, summary, aiSummary, oneLineSummary, keywords, tagsCache, adReason sql.NullString
+		var contentCleaned, summary, aiSummary, oneLineSummary, keywords, tagsCache, adReason, entities sql.NullString
 		err := rows.Scan(&article.ID, &article.FeedID, &article.CategoryID, &article.Title, &article.Link,
 			&article.Content, &contentCleaned, &summary, &aiSummary, &oneLineSummary, &keywords,
-			&tagsCache, &article.IsAd, &adReason, &article.PublishedAt, &article.FetchedAt)
+			&tagsCache, &article.IsAd, &adReason, &entities, &article.SummaryEmbedding, &article.PublishedAt, &article.FetchedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -490,6 +491,9 @@ func (d *DB) scanArticlesWithOneLineSummary(rows *sql.Rows) ([]*models.Article, 
 		}
 		if adReason.Valid {
 			article.AdReason = adReason.String
+		}
+		if entities.Valid {
+			article.Entities = entities.String
 		}
 		articles = append(articles, article)
 	}
