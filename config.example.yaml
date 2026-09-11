@@ -26,8 +26,9 @@ ai:
       base_url: ""
       api_key: ""
       model: ""
-    timeout: "60s"
+    timeout: "120s"       # 单请求超时（慢服务商建议 120s；文章分析总预算 = 此值 + 30s）
     retry_interval: "3s"  # 重试基础间隔（指数退避：3s、6s、12s...封顶60s）
+    max_retries: 3        # 单请求失败重试次数
 
   # Embedding 配置（用于向量化）
   embedding:
@@ -35,7 +36,13 @@ ai:
     base_url: "https://api.openai.com/v1"
     api_key: "your-api-key-here"
     model: "text-embedding-3-small"
-    timeout: "30s"
+    timeout: "60s"
+
+  # 速率限制（并发分析下由 Analyzer 全局闸门保证，调小可提升吞吐但消耗 API 配额更快）
+  rate_limit:
+    llm_interval: "3s"         # LLM 全局调用间隔（吞吐上限 ≈ 3600/此值 每小时）
+    embedding_interval: "1s"   # Embedding 全局调用间隔
+    article_interval: "3s"     # 文章间间隔（仅 feed 刷新即时分析路径使用）
 
 # RSS 订阅配置
 feeds:

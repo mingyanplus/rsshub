@@ -979,8 +979,18 @@ func isObviousSpam(title, content string) bool {
 }
 
 // analyzeArticleAsync 异步分析文章
+// analyzeCtxTimeout 单篇文章分析的总时间预算：LLM 单请求超时 + 30s 余量（覆盖翻译阶段与重试退避）。
+// 取代原先硬编码的 60s——慢服务商单次请求即可超过 60s，ctx 先于 httpClient.Timeout 到期，
+// 配置的 ai.llm.timeout 实际无法生效
+func analyzeCtxTimeout() time.Duration {
+	if appConfig != nil && appConfig.AI.LLM.Timeout > 0 {
+		return appConfig.AI.LLM.Timeout + 30*time.Second
+	}
+	return 90 * time.Second // 无配置时与默认 LLM 超时 60s + 30s 余量一致
+}
+
 func analyzeArticleAsync(articleID int64, title, content, description string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), analyzeCtxTimeout())
 	defer cancel()
 
 	// 使用内容或描述
@@ -6129,7 +6139,7 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 			text = text[:4000]
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), analyzeCtxTimeout())
 		defer cancel()
 
 		// 检查文章缺少哪些字段（entities/summary_embedding 已由查询取到真实值）
