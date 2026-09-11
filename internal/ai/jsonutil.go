@@ -27,21 +27,58 @@ func ExtractJSONFromResponse(response string) string {
 		}
 	}
 
-	// 提取 JSON 对象
+	// 提取 JSON 对象（平衡括号扫描：只取第一个完整对象）
 	startIdx := strings.Index(response, "{")
-	endIdx := strings.LastIndex(response, "}")
-	if startIdx >= 0 && endIdx > startIdx {
-		return response[startIdx : endIdx+1]
+	if startIdx >= 0 {
+		if endIdx := balancedJSONObjectEnd(response[startIdx:]); endIdx > 0 {
+			return response[startIdx : startIdx+endIdx]
+		}
+		// 括号不平衡：退回旧的「首 { 至末 }」截取，行为与旧版一致（交给解析器报错）
+		if lastIdx := strings.LastIndex(response, "}"); lastIdx > startIdx {
+			return response[startIdx : lastIdx+1]
+		}
 	}
 
 	// 尝试提取 JSON 数组
 	startIdx = strings.Index(response, "[")
-	endIdx = strings.LastIndex(response, "]")
+	endIdx := strings.LastIndex(response, "]")
 	if startIdx >= 0 && endIdx > startIdx {
 		return response[startIdx : endIdx+1]
 	}
 
 	return strings.TrimSpace(response)
+}
+
+// balancedJSONObjectEnd 返回 s 中首个平衡 JSON 对象的结束位置（不含）。
+// 引号感知：跳过字符串字面量内的 {} 与转义序列。
+// LLM 偶发把同一 JSON 输出两遍（{obj},{obj}），旧的「首 { 至末 }」截取
+// 会把两段拼在一起，json.Unmarshal 报 "invalid character ',' after top-level value"。
+func balancedJSONObjectEnd(s string) int {
+	depth := 0
+	inString := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if c == '\\' {
+				i++ // 跳过转义字符
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
 }
 
 // UnmarshalLenient 解析 JSON；失败时修复字符串值内未转义引号后重试，
