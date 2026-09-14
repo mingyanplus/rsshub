@@ -356,10 +356,11 @@ func TestBehaviorLogging(t *testing.T) {
 
 // ArticleContentFilter 取文章所属订阅源的过滤规则（原文抓取落库前应用）
 func TestArticleContentFilter(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "test-*.db")
+	tmpfile, err := os.CreateTemp("", "rss_test*.db")
 	if err != nil {
 		t.Fatal(err)
 	}
+	tmpfile.Close() // Windows 上 SQLite 无法打开仍被写入句柄持有的文件
 	defer os.Remove(tmpfile.Name())
 	db, err := New(tmpfile.Name())
 	if err != nil {

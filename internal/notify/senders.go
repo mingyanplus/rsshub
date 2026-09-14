@@ -11,6 +11,7 @@ import (
 	"net/smtp"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -240,7 +241,7 @@ func (s *DingTalkSender) Channel() Channel {
 	return ChannelDingTalk
 }
 
-// signedURL 计算加签 URL：secret 非空时追加 timestamp 与 sign 参数（钉钉"加签"安全设置）。
+// signedURL 计算加签 URL：secret 非空时以当前时间戳重算 sign（钉钉"加签"安全设置）。
 // 先剥掉 URL 上已有的 timestamp/sign——从钉钉文档示例复制的完整 URL 带旧签名参数，
 // 双份参数会让钉钉校验到旧时间戳，报 310000「机器人发送签名过期」
 func (s *DingTalkSender) signedURL() string {
@@ -251,22 +252,16 @@ func (s *DingTalkSender) signedURL() string {
 	q := u.Query()
 	q.Del("timestamp")
 	q.Del("sign")
-	u.RawQuery = q.Encode()
-	base := u.String()
-
-	if s.config.Secret == "" {
-		return base
+	if s.config.Secret != "" {
+		timestamp := time.Now().UnixMilli()
+		stringToSign := fmt.Sprintf("%d\n%s", timestamp, s.config.Secret)
+		mac := hmac.New(sha256.New, []byte(s.config.Secret))
+		mac.Write([]byte(stringToSign))
+		q.Set("timestamp", strconv.FormatInt(timestamp, 10))
+		q.Set("sign", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
 	}
-	timestamp := time.Now().UnixMilli()
-	stringToSign := fmt.Sprintf("%d\n%s", timestamp, s.config.Secret)
-	mac := hmac.New(sha256.New, []byte(s.config.Secret))
-	mac.Write([]byte(stringToSign))
-	sign := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	sep := "?"
-	if u.RawQuery != "" {
-		sep = "&"
-	}
-	return fmt.Sprintf("%s%stimestamp=%d&sign=%s", base, sep, timestamp, url.QueryEscape(sign))
+	u.RawQuery = q.Encode() // Encode 统一做 QueryEscape（与旧手动转义等价）
+	return u.String()
 }
 
 func (s *DingTalkSender) Send(msg *Message) *Result {

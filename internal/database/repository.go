@@ -538,7 +538,6 @@ func (d *DB) UpdateArticleEmbedding(id int64, embedding []byte) error {
 }
 
 // UpdateArticleContent 更新文章正文内容
-// UpdateArticleContent 更新文章内容
 func (d *DB) UpdateArticleContent(id int64, content string) error {
 	_, err := d.db.Exec(`UPDATE articles SET content = ? WHERE id = ?`, content, id)
 	return err

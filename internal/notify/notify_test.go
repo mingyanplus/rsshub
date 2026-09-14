@@ -2,7 +2,7 @@ package notify
 
 import (
 	"net/url"
-	"strings"
+
 	"testing"
 )
 
@@ -200,20 +200,20 @@ func TestDingTalkSignedURLStripsStaleParams(t *testing.T) {
 		WebhookURL: "https://oapi.dingtalk.com/robot/send?access_token=tok&timestamp=1600000000000&sign=OLD",
 		Secret:     "SEC123",
 	})
-	got := s.signedURL()
+	u, err := url.Parse(s.signedURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
 
-	if strings.Contains(got, "OLD") || strings.Contains(got, "1600000000000") {
-		t.Errorf("stale sign params not stripped: %s", got)
+	if got := q.Get("timestamp"); got == "1600000000000" || len(got) != 13 {
+		t.Errorf("stale timestamp not re-signed: %q", got)
 	}
-	if !strings.Contains(got, "access_token=tok") {
-		t.Errorf("access_token lost: %s", got)
+	if got := q.Get("sign"); got == "OLD" || got == "" {
+		t.Errorf("stale sign not replaced: %q", got)
 	}
-	if !strings.Contains(got, "timestamp=") || !strings.Contains(got, "sign=") {
-		t.Errorf("fresh sign params missing: %s", got)
-	}
-	// timestamp 应为毫秒量级（13 位），秒级时间戳会被钉钉判为过期
-	if ts := timestampParam(got); len(ts) != 13 {
-		t.Errorf("timestamp = %q (%d digits), want 13 (ms)", ts, len(ts))
+	if got := q.Get("access_token"); got != "tok" {
+		t.Errorf("access_token lost: %q", got)
 	}
 }
 
@@ -226,12 +226,4 @@ func TestDingTalkSignedURLNoSecret(t *testing.T) {
 	if got != "https://oapi.dingtalk.com/robot/send?access_token=tok" {
 		t.Errorf("unexpected URL: %s", got)
 	}
-}
-
-func timestampParam(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
-	}
-	return u.Query().Get("timestamp")
 }

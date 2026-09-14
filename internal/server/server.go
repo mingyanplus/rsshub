@@ -2493,9 +2493,8 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 使用 readability 获取原文（经 crawler.HTTPClient，跟随代理配置）；
-	// 先应用订阅源内容过滤再做长度保护与落库（比较/保存的都是过滤后的实际内容）
-	content, title, err := fetchArticleOriginalContent(r.Context(), article.Link)
+	// 使用 readability 获取原文（内部已应用订阅源内容过滤），再做长度保护后落库
+	content, title, err := fetchArticleOriginalContent(r.Context(), id, article.Link)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2504,7 +2503,6 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	content = crawler.ApplyContentFilter(content, appDB.ArticleContentFilter(id))
 
 	// 获取原文保护：抓取结果比现有正文短很多时视为疑似失败（错误页/验证页/部分渲染），不覆盖
 	// 默认开启；可在设置页关闭（feeds.protect_fetch_original）
@@ -2547,7 +2545,10 @@ const maxFetchBodyBytes = 10 << 20 // 10MB
 // fetchArticleOriginalContent 抓取链接并用 readability 提取正文（经 crawler.HTTPClient，跟随代理配置）。
 // 先读头部嗅探内容类型，非 HTML 文本（PDF/图片等二进制）会被 readability 当 HTML "解析" 成乱码，
 // 这里提前拒绝且不下载剩余部分；正文读取以 maxFetchBodyBytes 封顶
-func fetchArticleOriginalContent(ctx context.Context, link string) (content, title string, err error) {
+// fetchArticleOriginalContent 抓取链接并用 readability 提取正文（经 crawler.HTTPClient，跟随代理配置），
+// 返回前应用文章所属订阅源的内容过滤规则——「抓到的原文必经过滤」由此函数保证，
+// 调用方（自动兜底/手动获取）无需各自记得过滤
+func fetchArticleOriginalContent(ctx context.Context, articleID int64, link string) (content, title string, err error) {
 	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	if appConfig != nil && appConfig.Feeds.FetchUserAgent != "" {
 		userAgent = appConfig.Feeds.FetchUserAgent
@@ -2585,7 +2586,7 @@ func fetchArticleOriginalContent(ctx context.Context, link string) (content, tit
 	if err != nil {
 		return "", "", fmt.Errorf("获取原文失败: %w", err)
 	}
-	return art.Content, art.Title, nil
+	return crawler.ApplyContentFilter(art.Content, appDB.ArticleContentFilter(articleID)), art.Title, nil
 }
 
 // noContentMarkReason 无正文无摘要且自动抓取原文失败时的出队标记文案
@@ -2600,13 +2601,12 @@ func tryFetchArticleContent(id int64, link string) string {
 	// 后台自动抓取用独立短超时，避免死链在串行批处理循环里长时间阻塞（手动抓取走请求 ctx）
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	content, _, err := fetchArticleOriginalContent(ctx, link)
+	// 抓取内部已应用订阅源内容过滤，全文被滤空时视同无内容
+	content, _, err := fetchArticleOriginalContent(ctx, id, link)
 	if err != nil {
 		fmt.Printf("Article %d auto fetch original skipped: %v\n", id, err)
 		return ""
 	}
-	// 应用订阅源内容过滤（HTML 源等无正文入库环节，过滤在此补齐），全文被滤空视为无内容
-	content = crawler.ApplyContentFilter(content, appDB.ArticleContentFilter(id))
 	if strings.TrimSpace(stripHTMLSimple(content)) == "" {
 		fmt.Printf("Article %d auto fetch original skipped: empty content\n", id)
 		return ""
@@ -3622,6 +3622,35 @@ func SetConfigPath(path string) {
 	configFilePath = path
 }
 
+// sectionKeys 扫描配置行，返回顶级段 section 直接子行中各 key（含冒号，如 "password:"）
+// 是否存在，以及段内第一个非注释属性行的缩进（段缺失或无属性行时缩进返回 ""）。
+// 供 saveConfigToFile 的「段内缺行则插入」预检复用（server 密码、push.dingtalk 等）
+func sectionKeys(lines []string, section string, keys ...string) (present map[string]bool, indent string) {
+	present = make(map[string]bool, len(keys))
+	inSection := false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+			inSection = t == section || strings.HasPrefix(t, section) // 顶级行：进入或离开目标段
+			continue
+		}
+		if !inSection || t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		for _, k := range keys {
+			if strings.HasPrefix(t, k) {
+				present[k] = true
+			}
+		}
+		if indent == "" { // 只记第一个属性行的缩进，插入时保持一致
+			if i := len(l) - len(strings.TrimLeft(l, " \t")); i > 0 {
+				indent = l[:i]
+			}
+		}
+	}
+	return present, indent
+}
+
 // saveConfigToFile 保存配置到文件
 func saveConfigToFile() error {
 	if configFilePath == "" || appConfig == nil {
@@ -3638,63 +3667,23 @@ func saveConfigToFile() error {
 	lines := strings.Split(string(originalContent), "\n")
 	var result strings.Builder
 
-	// 预检 server 段内是否已有 password / reader_password 行（没有则在 server: 行后插入）
-	serverHasPassword := false
-	serverHasReaderPassword := false
-	serverIndent := "  " // server 段属性行缩进（默认 2 空格，与示例配置一致）
-	{
-		inServer := false
-		for _, l := range lines {
-			t := strings.TrimSpace(l)
-			if strings.HasPrefix(t, "server:") {
-				inServer = true
-				continue
-			}
-			if inServer {
-				if t != "" && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
-					inServer = false // 下一个顶级键，server 段结束
-				} else if strings.HasPrefix(t, "password:") {
-					serverHasPassword = true
-					if serverHasReaderPassword {
-						break
-					}
-				} else if strings.HasPrefix(t, "reader_password:") {
-					serverHasReaderPassword = true
-					if serverHasPassword {
-						break
-					}
-				} else if serverIndent == "  " && t != "" && !strings.HasPrefix(t, "#") {
-					// 记录段内第一个属性行的缩进，插入时保持一致
-					if i := len(l) - len(strings.TrimLeft(l, " \t")); i > 0 {
-						serverIndent = l[:i]
-					}
-				}
-			}
-		}
+	// 预检 server 段：password / reader_password 行是否存在（缺则在 server: 行后插入）
+	serverPresent, serverIndent := sectionKeys(lines, "server:", "password:", "reader_password:")
+	serverHasPassword := serverPresent["password:"]
+	serverHasReaderPassword := serverPresent["reader_password:"]
+	if serverIndent == "" {
+		serverIndent = "  " // 段缺失/无属性行时的默认缩进，与示例配置一致
 	}
+
 	inServerSection := false
 	inPromptsSection := false
 	inDataBackupSection := false
 
-	// 预检 push 段内是否已有 dingtalk 子段及子段缩进（没有则在 push: 行后插入）
-	pushHasDingTalk := strings.Contains(string(originalContent), "dingtalk:")
-	pushChildIndent := "    " // push 子段默认 4 空格缩进（与示例配置一致）
-	{
-		inPush := false
-		for _, l := range lines {
-			t := strings.TrimSpace(l)
-			if !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
-				inPush = strings.HasPrefix(t, "push:")
-				continue
-			}
-			if inPush && t != "" && !strings.HasPrefix(t, "#") {
-				// push 段内第一个属性行（子段头或直接属性）的缩进
-				if i := len(l) - len(strings.TrimLeft(l, " \t")); i > 0 {
-					pushChildIndent = l[:i]
-				}
-				break
-			}
-		}
+	// 预检 push 段：dingtalk 子段是否存在及子段缩进（缺则在 push: 行后插入）
+	pushPresent, pushChildIndent := sectionKeys(lines, "push:", "dingtalk:")
+	pushHasDingTalk := pushPresent["dingtalk:"]
+	if pushChildIndent == "" {
+		pushChildIndent = "    " // 默认 4 空格缩进，与示例配置一致
 	}
 	pushAttrIndent := pushChildIndent + "  "
 
@@ -3729,6 +3718,7 @@ func saveConfigToFile() error {
 	inWebhookSection := false
 	inQQBotSection := false
 	inDingTalkSection := false
+	inProxySection := false
 	proxySectionSeen := false
 
 	for _, line := range lines {
@@ -3737,6 +3727,10 @@ func saveConfigToFile() error {
 		// 顶级键开启新段时结束 server 段（避免误更新其他段的 password，如 email）
 		if inServerSection && trimmedLine != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmedLine, "#") {
 			inServerSection = false
+		}
+		// 顶级键开启新段时结束 proxy 段（proxy 更新块只认段内行，见下方守卫说明）
+		if inProxySection && trimmedLine != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmedLine, "#") {
+			inProxySection = false
 		}
 		// 顶级键开启新段时结束 prompts 段
 		if inPromptsSection && trimmedLine != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmedLine, "#") {
@@ -3807,6 +3801,7 @@ func saveConfigToFile() error {
 			inQQBotSection = false
 		} else if strings.HasPrefix(trimmedLine, "proxy:") {
 			proxySectionSeen = true
+			inProxySection = true
 			inQQBotSection = false
 			inEmailSection = false
 			inGotifySection = false
@@ -3821,8 +3816,8 @@ func saveConfigToFile() error {
 			// push 段缺 dingtalk 子段时紧跟 push: 行插入（钉钉是后加的渠道，存量配置无此子段）
 			if !pushHasDingTalk {
 				result.WriteString(line + "\n")
-				result.WriteString(fmt.Sprintf("%sdingtalk:\n%senabled: true\n%swebhook_url: %q\n%ssecret: %q\n",
-					pushChildIndent, pushAttrIndent, pushAttrIndent, appConfig.Push.DingTalk.WebhookURL, pushAttrIndent, appConfig.Push.DingTalk.Secret))
+				result.WriteString(fmt.Sprintf("%sdingtalk:\n%senabled: %t\n%swebhook_url: %q\n%ssecret: %q\n",
+					pushChildIndent, pushAttrIndent, appConfig.Push.DingTalk.Enabled, pushAttrIndent, appConfig.Push.DingTalk.WebhookURL, pushAttrIndent, appConfig.Push.DingTalk.Secret))
 				continue
 			}
 		}
@@ -3928,21 +3923,21 @@ func saveConfigToFile() error {
 		if inDingTalkSection {
 			if strings.HasPrefix(trimmedLine, "enabled:") {
 				line = updateYAMLValue(line, fmt.Sprintf("%t", appConfig.Push.DingTalk.Enabled))
-			} else if strings.Contains(line, "webhook_url:") {
+			} else if strings.HasPrefix(trimmedLine, "webhook_url:") {
 				line = updateYAMLValue(line, appConfig.Push.DingTalk.WebhookURL)
-			} else if strings.Contains(line, "secret:") {
+			} else if strings.HasPrefix(trimmedLine, "secret:") {
 				line = updateYAMLValue(line, appConfig.Push.DingTalk.Secret)
 			}
 		}
 
-		// 更新代理配置（proxy: 段内）
-		if proxySectionSeen && !strings.HasPrefix(trimmedLine, "proxy:") &&
-			(strings.Contains(line, "url:") || strings.Contains(line, "enable_content:") || strings.Contains(line, "enable_llm:")) {
+		// 更新代理配置（仅 proxy: 顶级段内——旧写法用「文件出现过 proxy 段」+ 行含 url: 判断，
+		// 会把 dingtalk 的 webhook_url 等任何含 url: 的行用 Proxy.URL 覆盖清空）
+		if inProxySection {
 			if strings.Contains(line, "enable_content:") {
 				line = updateYAMLValue(line, fmt.Sprintf("%t", appConfig.Proxy.EnableContent))
 			} else if strings.Contains(line, "enable_llm:") {
 				line = updateYAMLValue(line, fmt.Sprintf("%t", appConfig.Proxy.EnableLLM))
-			} else {
+			} else if strings.Contains(line, "url:") {
 				line = updateYAMLValue(line, appConfig.Proxy.URL)
 			}
 		}
@@ -3997,7 +3992,14 @@ func saveConfigToFile() error {
 			appConfig.DataBackup.AutoEnable, backupInterval().String(), maxBackupFiles()))
 	}
 
-	return os.WriteFile(configFilePath, []byte(result.String()), 0644)
+	// 原子写盘：先写同目录临时文件再 rename 替换。直接 WriteFile 非原子，
+	// fsnotify 会在写入中途触发热重载，viper 读到半截文件把残缺配置覆盖进内存
+	// （表现为「保存后部分字段丢失」）
+	tmpPath := configFilePath + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(result.String()), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, configFilePath)
 }
 
 // updateYAMLValue 更新 YAML 行中的值
