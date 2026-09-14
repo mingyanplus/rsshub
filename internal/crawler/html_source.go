@@ -11,16 +11,20 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-// HtmlSourceConfig HTML 源配置
+// HtmlSourceConfig HTML 源配置。title/link/date 三个选择器均支持「选择器@属性」约定语法：
+// 如 img@alt 取图片 alt 作标题、.item@data-url 取条目自身属性作链接、time@datetime 取时间属性。
+// @ 在 CSS 元素选择器中不出现，无歧义；不写 @ 走默认取值（文本 / href / datetime 属性 → 文本），
+// 写了 @ 但属性不存在时同样回退默认取值
 type HtmlSourceConfig struct {
 	URL             string `json:"url"`
 	ItemSelector    string `json:"item_selector"`
 	TitleSelector   string `json:"title_selector"`
 	LinkSelector    string `json:"link_selector"`
-	LinkAttr        string `json:"link_attr"`
+	LinkAttr        string `json:"link_attr"` // 链接属性；留空默认 href（@ 语法优先于此字段，保留以兼容存量配置）
 	DateSelector    string `json:"date_selector"`
 	ContentSelector string `json:"content_selector"`
 	BaseURL         string `json:"base_url"`
+	Encoding        string `json:"encoding"` // 页面编码（gb2312/gbk/gb18030/big5 等）；留空自动识别，识别失败按 UTF-8
 }
 
 // HtmlSource HTML 页面数据源
@@ -50,12 +54,13 @@ func NewHtmlSource(feedURL, configJSON string) (*HtmlSource, error) {
 }
 
 func (s *HtmlSource) FetchAndParse(ctx context.Context) (*Feed, error) {
-	data, err := FetchFeed(ctx, s.config.URL)
+	// 经 FetchHTMLText 转码为 UTF-8：GB2312/GBK 等老站直接按字节当 UTF-8 解析会全页乱码
+	html, err := FetchHTMLText(ctx, s.config.URL, s.config.Encoding)
 	if err != nil {
 		return nil, err
 	}
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(data)))
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
@@ -68,14 +73,32 @@ func (s *HtmlSource) FetchAndParse(ctx context.Context) (*Feed, error) {
 	doc.Find(s.config.ItemSelector).Each(func(i int, sel *goquery.Selection) {
 		item := &FeedItem{}
 
-		item.Title = strings.TrimSpace(pickTarget(sel, s.config.TitleSelector).Text())
+		// 标题默认取文本；选择器带 @属性 时属性值优先（如 img@alt）
+		titleSel, titleAttr := selectTarget(sel, s.config.TitleSelector, "")
+		item.Title = strings.TrimSpace(titleSel.Text())
+		if titleAttr != "" {
+			if v, exists := titleSel.Attr(titleAttr); exists && strings.TrimSpace(v) != "" {
+				item.Title = strings.TrimSpace(v)
+			}
+		}
 
-		if link, exists := pickTarget(sel, s.config.LinkSelector).Attr(s.config.LinkAttr); exists {
+		// 链接：@属性 优先，属性缺失或为空时回退 link_attr（默认 href）
+		linkSel, linkAttrOverride := selectTarget(sel, s.config.LinkSelector, "")
+		linkAttr := s.config.LinkAttr
+		if linkAttrOverride != "" {
+			linkAttr = linkAttrOverride
+		}
+		link, exists := linkSel.Attr(linkAttr)
+		if (!exists || strings.TrimSpace(link) == "") && linkAttr != s.config.LinkAttr {
+			link, exists = linkSel.Attr(s.config.LinkAttr)
+		}
+		if exists && strings.TrimSpace(link) != "" {
 			item.Link = resolveURL(s.config.BaseURL, link)
 		}
 
-		dateSel := pickTarget(sel, s.config.DateSelector)
-		dateStr := dateSel.AttrOr("datetime", "")
+		// 日期取值链：@属性/datetime 属性 → 文本
+		dateSel, dateAttr := selectTarget(sel, s.config.DateSelector, "datetime")
+		dateStr := dateSel.AttrOr(dateAttr, "")
 		if dateStr == "" {
 			dateStr = strings.TrimSpace(dateSel.Text())
 		}
@@ -107,6 +130,26 @@ func pickTarget(sel *goquery.Selection, selector string) *goquery.Selection {
 		return sel
 	}
 	return sel.Find(selector).First()
+}
+
+// selectTarget 解析「选择器@属性」并定位目标元素：expr 带 @ 时取其属性名，
+// 未写 @ 时属性回退 defaultAttr（链接为 link_attr、日期为 datetime、标题为空=取文本）
+func selectTarget(item *goquery.Selection, expr, defaultAttr string) (*goquery.Selection, string) {
+	sel, attr := parseSelectorAttr(expr)
+	if attr == "" {
+		attr = defaultAttr
+	}
+	return pickTarget(item, sel), attr
+}
+
+// parseSelectorAttr 解析「选择器@属性」约定语法（img@alt、.item@data-url、@data-url 等）：
+// 以最后一个 @ 分隔，@ 前为 CSS 选择器（留空表示条目自身）、后为属性名；
+// 无 @ 时原样返回选择器、属性为空。@ 不出现在 CSS 元素选择器中，切分无歧义
+func parseSelectorAttr(expr string) (selector, attr string) {
+	if i := strings.LastIndex(expr, "@"); i >= 0 {
+		return strings.TrimSpace(expr[:i]), strings.TrimSpace(expr[i+1:])
+	}
+	return expr, ""
 }
 
 // resolveURL 将相对链接补全为绝对链接

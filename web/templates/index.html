@@ -67,21 +67,26 @@
         </div>
     </div>
 
-    <!-- 快捷操作 -->
+    {{if .IsAdmin}}
+    <!-- 快捷操作（管理员） -->
     <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
         <div class="flex items-center gap-4 flex-wrap">
             <button onclick="refreshAllFeeds(this)"
-                    class="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50">
+                    class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition disabled:opacity-50">
                 <span>🔄</span> 刷新全部订阅
             </button>
             <button onclick="processPending(this)"
-                    class="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition disabled:opacity-50">
+                    class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition disabled:opacity-50">
                 <span>🤖</span> 处理待分析文章
             </button>
-            <a href="/feeds" class="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition">
+            <button onclick="rebuildTopics(this)" title="清空现有话题，从近 30 天已分析的文章重新聚合"
+                    class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition disabled:opacity-50">
+                <span>♻️</span> 重建话题流
+            </button>
+            <a href="/feeds" class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition">
                 <span>📥</span> 订阅管理
             </a>
-            <a href="/rules" class="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition">
+            <a href="/rules" class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition">
                 <span>⭐</span> 关注规则
             </a>
         </div>
@@ -89,6 +94,7 @@
             <div class="flex items-center gap-2 px-3 py-2 rounded-lg"></div>
         </div>
     </div>
+    {{end}}
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- 热门话题（话题流高分话题） -->
@@ -259,6 +265,23 @@ async function processPending(btn) {
     }
 }
 
+// 重建话题流（从近 30 天已分析文章重新聚合，异步执行）
+async function rebuildTopics(btn) {
+    if (!confirm('将清空现有话题，从近 30 天已分析的文章重新聚合（多源话题会调用 AI 生成综合摘要，可能产生少量 API 费用）。确定继续？')) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="animate-spin">⏳</span> 重建中...';
+    try {
+        const res = await fetch('/api/topics/rebuild?days=30', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showActionResult(`已开始重建，共 ${data.articles} 篇文章。聚合在后台进行，稍后到话题流查看`);
+    } catch (err) {
+        showActionResult('重建失败：' + err.message, false);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>♻️</span> 重建话题流';
+    }
+}
 // 显示文章详情
 async function showArticleDetail(id) {
     const modal = document.getElementById('article-modal');

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Title}} - RSS AI Reader</title>
+    <title>{{.Title}} - AI Reader</title>
     <script src="/static/js/tailwind.min.js"></script>
     <script src="/static/js/htmx.min.js"></script>
     <script>
@@ -120,7 +120,7 @@
         <!-- 侧边栏 -->
         <aside id="sidebar" class="w-64 bg-sidebar border-r border-gray-200 flex-shrink-0 fixed left-0 top-0 h-full z-30 -translate-x-full lg:translate-x-0 transition-transform duration-200 flex flex-col">
             <div class="p-4 border-b border-gray-200">
-                <h1 class="text-xl font-bold text-[#1a6b3c] tracking-wide flex items-center gap-2"><svg class="w-6 h-6" aria-hidden="true"><use href="#i-newspaper"/></svg>RSS AI Reader</h1>
+                <h1 class="text-xl font-bold text-[#1a6b3c] tracking-wide flex items-center gap-2"><svg class="w-6 h-6" aria-hidden="true"><use href="#i-newspaper"/></svg>AI Reader</h1>
                 <p class="text-xs text-gray-400 mt-0.5 tracking-widest">读报 · 不炸裂</p>
             </div>
 
@@ -139,9 +139,11 @@
                     <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-document"/></svg> 文章列表
                 </a>
 
+                {{if .IsAdmin}}
                 <a href="/feeds" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "feeds"}}active{{end}}">
                     <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-inbox"/></svg> 订阅管理
                 </a>
+                {{end}}
 
                 <div class="text-xs text-gray-400 tracking-widest px-3 py-2 mt-4">分类浏览</div>
 
@@ -155,9 +157,11 @@
 
                 <div class="text-xs text-gray-400 tracking-widest px-3 py-2 mt-4">AI 功能</div>
 
+                {{if .IsAdmin}}
                 <a href="/rules" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "rules"}}active{{end}}">
                     <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-star"/></svg> 关注规则
                 </a>
+                {{end}}
 
                 <a href="/reports" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "reports"}}active{{end}}">
                     <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-newspaper"/></svg> 早晚报/日报
@@ -167,6 +171,7 @@
                     <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-search"/></svg> 事件追踪
                 </a>
 
+                {{if .IsAdmin}}
                 <div class="text-xs text-gray-400 tracking-widest px-3 py-2 mt-4">系统</div>
 
                 <a href="/settings" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "settings"}}active{{end}}">
@@ -176,6 +181,7 @@
                 <a href="/data" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-[#175a33] transition {{if eq .Active "data"}}active{{end}}">
                     <svg class="w-5 h-5 flex-shrink-0" aria-hidden="true"><use href="#i-database"/></svg> 数据管理
                 </a>
+                {{end}}
             </nav>
 
             <!-- 底部状态 -->
@@ -183,6 +189,7 @@
                 <div class="flex items-center gap-2 text-sm text-gray-500">
                     <span class="w-2 h-2 bg-green-500 rounded-full"></span>
                     <span>服务运行中</span>
+                    {{if not .IsAdmin}}<span class="ml-auto text-xs text-gray-400">访客 · 仅浏览</span>{{end}}
                 </div>
             </div>
         </aside>
@@ -303,3 +310,92 @@
     </script>
 </body>
 </html>
+
+{{/* preview-body-styles 文章预览正文排版（多页共用，各页 style 块内引用） */}}
+{{define "preview-body-styles"}}
+#preview-body {
+    line-height: 1.9;
+}
+#preview-body p {
+    margin-top: 1.5em;
+    margin-bottom: 1.5em;
+}
+/* 正文内嵌 HTML 的常规排版（覆盖来源站残缺样式，色板与全局报纸风一致） */
+#preview-body img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin: 0.5em 0;
+}
+#preview-body table {
+    display: block;
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.25em 0;
+    font-size: 0.9em;
+    overflow-x: auto; /* 宽表横向滚动，避免撑破布局 */
+}
+#preview-body th, #preview-body td {
+    border: 1px solid #d6d3cd;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+}
+#preview-body th {
+    background: #f4f3f1;
+    font-weight: 600;
+}
+#preview-body pre {
+    background: #f4f3f1;
+    border: 1px solid #e8e6e2;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 1.25em 0;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.6;
+}
+#preview-body code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+#preview-body p > code, #preview-body li > code {
+    background: #f4f3f1;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.9em;
+}
+#preview-body blockquote {
+    border-left: 3px solid #b7d5c4;
+    background: #f0f7f2;
+    border-radius: 0 4px 4px 0;
+    padding: 8px 14px;
+    margin: 1.25em 0;
+    color: #78716c;
+}
+#preview-body ul, #preview-body ol {
+    padding-left: 1.6em;
+    margin: 1.25em 0;
+}
+#preview-body ul { list-style: disc; }
+#preview-body ol { list-style: decimal; }
+#preview-body li { margin: 0.4em 0; }
+#preview-body h1, #preview-body h2, #preview-body h3, #preview-body h4 {
+    font-weight: 700;
+    color: #1c1b19;
+    margin: 1.5em 0 0.6em;
+    line-height: 1.4;
+}
+#preview-body h1 { font-size: 1.25em; }
+#preview-body h2 { font-size: 1.15em; }
+#preview-body h3 { font-size: 1.05em; }
+#preview-body a {
+    color: #1a6b3c;
+    text-decoration: underline;
+}
+#preview-body hr {
+    border: none;
+    border-top: 1px solid #e8e6e2;
+    margin: 1.5em 0;
+}
+#preview-body strong { font-weight: 700; }
+{{end}}

@@ -47,6 +47,7 @@ type TopicAggregator struct {
 	activeWindow        time.Duration  // 活跃话题窗口：超过该时长未更新的话题不再参与合入
 	summaryRefresh      time.Duration  // 话题摘要 LLM 重写的最小间隔（控成本）
 	archiveWindow       time.Duration  // 超过该时长无更新则归档
+	categories          []CategoryRule // 频道分类规则（normalizeCategory 用）
 	mu                  sync.Mutex     // 串行化聚合，避免并发分析创建重复话题
 	lastArchiveRun      time.Time      // 上次归档清理时间（内部节流）
 	cache               []*cachedTopic // 活跃话题缓存（mu 保护下维护，合入/新建时同步更新）
@@ -61,8 +62,12 @@ type cachedTopic struct {
 	vectors  [][]float32 // 话题内全部成员文章的向量
 }
 
-// NewTopicAggregator 创建话题聚合器（参数取包内默认值，需要调整时改常量）
-func NewTopicAggregator(db *database.DB, analyzer *ai.Analyzer) *TopicAggregator {
+// NewTopicAggregator 创建话题聚合器（参数取包内默认值，需要调整时改常量）。
+// categories 为频道分类规则，传 nil/空用内置默认；可在 config.yaml 的 topics.categories 自定义
+func NewTopicAggregator(db *database.DB, analyzer *ai.Analyzer, categories []CategoryRule) *TopicAggregator {
+	if len(categories) == 0 {
+		categories = defaultCategoryRules
+	}
 	return &TopicAggregator{
 		db:             db,
 		analyzer:       analyzer,
@@ -70,6 +75,7 @@ func NewTopicAggregator(db *database.DB, analyzer *ai.Analyzer) *TopicAggregator
 		activeWindow:   DefaultTopicActiveWindow,
 		summaryRefresh: DefaultSummaryRefresh,
 		archiveWindow:  topicArchiveWindow,
+		categories:     categories,
 	}
 }
 
@@ -222,7 +228,7 @@ func (a *TopicAggregator) mergeIntoTopic(c *cachedTopic, article *models.Article
 	return nil
 }
 
-// 频道大类（话题分类收敛目标，避免 AI 生成的细粒度分类碎片化）
+// 频道大类常量（内置默认分类名；config.yaml 配置 topics.categories 后以配置为准）
 const (
 	CategoryTech    = "科技"
 	CategoryAI      = "AI"
@@ -231,32 +237,44 @@ const (
 	CategorySociety = "社会"
 	CategoryLife    = "生活"
 	CategoryHealth  = "健康"
+	CategoryEdu     = "教育"
 	CategoryOther   = "其他"
 )
 
-// normalizeCategory 将 AI 生成的细粒度主题分类（如"社会观察""生活感悟""产品发布"）收敛为频道大类
-func normalizeCategory(raw string) string {
+// CategoryRule 频道分类规则：AI 细粒度分类含任一关键词（子串匹配）即归入该频道
+type CategoryRule struct {
+	Name     string
+	Keywords []string
+}
+
+// defaultCategoryRules 内置频道分类规则，按序匹配首个命中；未配置 topics.categories 时启用
+var defaultCategoryRules = []CategoryRule{
+	{Name: CategoryAI, Keywords: []string{"AI", "人工智能", "大模型", "大语言模型", "LLM", "GPT"}},
+	{Name: CategoryFinance, Keywords: []string{"财经", "金融", "投资", "股市", "经济", "商业", "创投"}},
+	{Name: CategoryWorld, Keywords: []string{"国际", "军事", "外交", "地缘"}},
+	{Name: CategoryHealth, Keywords: []string{"健康", "医疗", "养生", "医学"}},
+	{Name: CategoryEdu, Keywords: []string{"教育", "学校", "考试", "招生", "高考", "中考", "考研", "留学", "校园", "学术"}},
+	{Name: CategoryLife, Keywords: []string{"生活", "个人", "情感", "文化", "娱乐", "体育", "职场", "读书", "知识"}},
+	{Name: CategorySociety, Keywords: []string{"社会", "时政", "评论", "观点", "法律", "政策"}},
+	{Name: CategoryTech, Keywords: []string{"科技", "技术", "软件", "硬件", "互联网", "数码", "开源", "产品", "公司", "行业", "编程", "工程", "科学"}},
+}
+
+// normalizeCategory 将 AI 生成的细粒度主题分类（如"社会观察""生活感悟""产品发布"）收敛为频道大类：
+// 按分类规则顺序做子串匹配，首个命中生效；规则可经 config.yaml 的 topics.categories 自定义，
+// 未配置时用内置默认规则
+func (a *TopicAggregator) normalizeCategory(raw string) string {
 	s := strings.TrimSpace(raw)
-	switch {
-	case s == "":
-		return CategoryOther
-	case strings.Contains(s, "AI") || strings.Contains(s, "人工智能") || strings.Contains(s, "大模型"):
-		return CategoryAI
-	case strings.ContainsAny(s, "财经金融投资股市经济商业"):
-		return CategoryFinance
-	case strings.ContainsAny(s, "国际军事外交地缘"):
-		return CategoryWorld
-	case strings.ContainsAny(s, "健康医疗养生医学"):
-		return CategoryHealth
-	case strings.ContainsAny(s, "生活个人情感文化娱乐体育职场教育读书知识"):
-		return CategoryLife
-	case strings.ContainsAny(s, "社会时政评论观点法律政策"):
-		return CategorySociety
-	case strings.ContainsAny(s, "科技技术软件硬件互联网数码开源产品公司行业编程工程科学"):
-		return CategoryTech
-	default:
+	if s == "" {
 		return CategoryOther
 	}
+	for _, rule := range a.categories {
+		for _, kw := range rule.Keywords {
+			if kw != "" && strings.Contains(s, kw) {
+				return rule.Name
+			}
+		}
+	}
+	return CategoryOther
 }
 
 // createTopic 为文章创建新话题（并加入缓存）
@@ -276,7 +294,7 @@ func (a *TopicAggregator) createTopic(article *models.Article, articleVec []floa
 		AISummary:      summary,
 		EntityKey:      firstNonEmpty(article.Entities, article.Keywords),
 		Keywords:       mergeKeywordSets("", article.Keywords, article.Entities),
-		Category:       normalizeCategory(article.TopicCategory),
+		Category:       a.normalizeCategory(article.TopicCategory),
 		HeatScore:      computeTopicHeat(1, 1, float64(article.ImportanceScore), 3),
 		ArticleCount:   1,
 		SourceCount:    1,

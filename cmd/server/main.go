@@ -35,7 +35,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("RSS AI Reader v%s (built: %s, commit: %s)\n", version, buildTime, gitCommit)
+		fmt.Printf("AI Reader v%s (built: %s, commit: %s)\n", version, buildTime, gitCommit)
 		os.Exit(0)
 	}
 
@@ -56,7 +56,7 @@ func main() {
 	// 初始化日志
 	initLogger(cfg, *logLevel)
 
-	logger.Info("Starting RSS AI Reader v%s", version)
+	logger.Info("Starting AI Reader v%s", version)
 	logger.Info("Server will listen on %s:%d", cfg.Server.Host, cfg.Server.Port)
 
 	// 初始化数据库
@@ -188,8 +188,9 @@ func main() {
 		server.SetHotTopicDetector(hotTopicDetector)
 		logger.Info("Hot topic detector initialized")
 
-		// 初始化话题聚合器（Readhub 式话题流，参数取包内默认常量）
-		topicAggregator := processor.NewTopicAggregator(db, analyzer)
+		// 初始化话题聚合器（Readhub 式话题流，参数取包内默认常量；
+		// 频道分类规则来自 config.yaml 的 topics.categories，留空用内置默认）
+		topicAggregator := processor.NewTopicAggregator(db, analyzer, buildTopicCategoryRules(cfg))
 		server.SetTopicAggregator(topicAggregator)
 		logger.Info("Topic aggregator initialized")
 	}
@@ -301,6 +302,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 		lifecycleTicker := time.NewTicker(lifecycleCheckInterval) // 生命周期检查
 		interestDecayTicker := time.NewTicker(interestDecayInterval) // 兴趣簇衰减
 		metricsWeeklyTicker := time.NewTicker(metricsWeeklyInterval) // 评估指标周报
+		dataBackupTicker := time.NewTicker(5 * time.Minute)          // 数据库自动备份检查（到期间隔才真正执行）
 
 		// 记录上次生成报告的日期，防止重复生成
 		var lastMorningReportDate, lastEveningReportDate, lastDailyReportDate string
@@ -330,6 +332,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 				lifecycleTicker.Stop()
 				interestDecayTicker.Stop()
 				metricsWeeklyTicker.Stop()
+				dataBackupTicker.Stop()
 				logger.Info("Scheduler stopped")
 				return
 
@@ -344,6 +347,10 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 				// 异步执行：批量分析耗时可能超过 tick 间隔，同步执行会阻塞整个
 				// 调度循环（RSS 刷新/早晚报/热点检测全部停摆）且丢弃错过的 tick
 				go processPendingArticles(db)
+
+			case <-dataBackupTicker.C:
+				// 数据库自动备份：距最近备份文件超过配置间隔才执行（内部自判，含超限清理）
+				go server.RunAutoBackup()
 
 			case <-reportCheckTicker.C:
 				// 检查是否需要生成早晚报
@@ -439,6 +446,19 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 	return func() {
 		close(stopChan)
 	}
+}
+
+// buildTopicCategoryRules 解析 config.yaml 的 topics.categories 为话题聚合器规则
+// （keywords 逗号分隔；name/keywords 缺失的条目忽略，全部为空时聚合器回退内置默认）
+func buildTopicCategoryRules(cfg *config.Config) []processor.CategoryRule {
+	var rules []processor.CategoryRule
+	for _, cat := range cfg.Topics.Categories {
+		name := strings.TrimSpace(cat.Name)
+		if kws := processor.ParseKeywords(cat.Keywords); name != "" && len(kws) > 0 {
+			rules = append(rules, processor.CategoryRule{Name: name, Keywords: kws})
+		}
+	}
+	return rules
 }
 
 // refreshAllFeeds 刷新所有订阅源

@@ -69,8 +69,11 @@ func InitTemplates(dir string) error {
 	return err
 }
 
-// renderTemplate 渲染模板
-func renderTemplate(w http.ResponseWriter, name string, data PageData) {
+// renderTemplate 渲染模板（统一注入当前会话权限级别，导航按访客/管理员渲染）
+func renderTemplate(w http.ResponseWriter, r *http.Request, name string, data PageData) {
+	// 页面处理器都挂在 AuthMiddleware 之后，此处级别只可能是访客或管理员；
+	// 用 == authLevelAdmin 判定，未登录（意外调用）不会误渲染管理界面
+	data.IsAdmin = authLevel(r) == authLevelAdmin
 	if templateDir == "" {
 		// 模板未初始化，返回简单 HTML
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

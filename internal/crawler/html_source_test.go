@@ -7,12 +7,18 @@ import (
 	"testing"
 )
 
-// serveHTML 起一个返回固定 HTML 的本地服务
+// serveHTML 起一个返回固定 UTF-8 HTML 的本地服务
 func serveHTML(t *testing.T, body string) *httptest.Server {
 	t.Helper()
+	return serveBytes(t, []byte(body), "text/html; charset=utf-8")
+}
+
+// serveBytes 起一个返回指定字节流与 Content-Type 的本地服务（模拟非 UTF-8 老站）
+func serveBytes(t *testing.T, body []byte, contentType string) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(body))
+		w.Header().Set("Content-Type", contentType)
+		w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -174,5 +180,129 @@ func TestHtmlSourceSelfDateFallback(t *testing.T) {
 	// 无属性时自身文本兜底（<time> 本身是条目）
 	if feed.Items[1].PublishedParsed == nil || feed.Items[1].PublishedParsed.Format("2006-01-02") != "2026-08-15" {
 		t.Errorf("Items[1].PublishedParsed = %v, want 2026-08-15（自身文本兜底）", feed.Items[1].PublishedParsed)
+	}
+}
+
+// GB2312 站点：响应头声明编码，列表页自动转码不乱码
+func TestHtmlSourceGB2312AutoDecode(t *testing.T) {
+	page := `<html><head><title>考试院</title></head><body><ul class="list">
+		<li><a href="/n1.html">2026年普通高校招生工作的通知</a></li>
+	</ul></body></html>`
+	srv := serveBytes(t, encodeGB18030(t, page), "text/html; charset=gb2312")
+
+	config := `{"url":"` + srv.URL + `","item_selector":".list a"}`
+	src, err := NewHtmlSource("", config)
+	if err != nil {
+		t.Fatalf("NewHtmlSource() error = %v", err)
+	}
+
+	feed, err := src.FetchAndParse(context.Background())
+	if err != nil {
+		t.Fatalf("FetchAndParse() error = %v", err)
+	}
+	if len(feed.Items) != 1 {
+		t.Fatalf("len(Items) = %v, want 1", len(feed.Items))
+	}
+	if feed.Items[0].Title != "2026年普通高校招生工作的通知" {
+		t.Errorf("Items[0].Title = %v, want GB2312 自动转码后的中文标题", feed.Items[0].Title)
+	}
+}
+
+// 无任何编码声明的 GBK 站点：自动识别失效，配置 encoding 手动兜底
+func TestHtmlSourceManualEncoding(t *testing.T) {
+	page := `<html><head><title>无声明</title></head><body><ul class="list">
+		<li><a href="/n2.html">关于调整考试时间的公告</a></li>
+	</ul></body></html>`
+	// 无 meta 无 header charset，模拟识别不出的老站
+	srv := serveBytes(t, encodeGB18030(t, page), "text/html")
+
+	config := `{"url":"` + srv.URL + `","item_selector":".list a","encoding":"gbk"}`
+	src, err := NewHtmlSource("", config)
+	if err != nil {
+		t.Fatalf("NewHtmlSource() error = %v", err)
+	}
+
+	feed, err := src.FetchAndParse(context.Background())
+	if err != nil {
+		t.Fatalf("FetchAndParse() error = %v", err)
+	}
+	if len(feed.Items) != 1 {
+		t.Fatalf("len(Items) = %v, want 1", len(feed.Items))
+	}
+	if feed.Items[0].Title != "关于调整考试时间的公告" {
+		t.Errorf("Items[0].Title = %v, want 手动 gbk 转码后的中文标题", feed.Items[0].Title)
+	}
+}
+
+// 「选择器@属性」约定语法：链接/标题/日期均可从任意属性取值。
+// 页面模拟非标准结构：链接在条目自身 data-url、标题在 img 的 alt、日期在 data-time
+func TestHtmlSourceSelectorAttrSyntax(t *testing.T) {
+	srv := serveHTML(t, `<!DOCTYPE html>
+<html><head><title>自定义属性站点</title></head>
+<body>
+<ul class="list">
+	<li class="item" data-url="/detail/1.html">
+		<img src="/img1.png" alt="通过图片alt取到的标题">
+		<span class="pub" data-time="2026-09-01">昨天</span>
+	</li>
+</ul>
+</body></html>`)
+
+	// 标题选择器 img@alt、链接选择器留空 + 条目自身 @data-url、日期 .pub@data-time
+	config := `{"url":"` + srv.URL + `","item_selector":".item","title_selector":"img@alt","link_selector":"@data-url","date_selector":".pub@data-time"}`
+	src, err := NewHtmlSource("", config)
+	if err != nil {
+		t.Fatalf("NewHtmlSource() error = %v", err)
+	}
+
+	feed, err := src.FetchAndParse(context.Background())
+	if err != nil {
+		t.Fatalf("FetchAndParse() error = %v", err)
+	}
+	if len(feed.Items) != 1 {
+		t.Fatalf("len(Items) = %v, want 1", len(feed.Items))
+	}
+	it := feed.Items[0]
+	if it.Title != "通过图片alt取到的标题" {
+		t.Errorf("Title = %v, want img@alt 取值", it.Title)
+	}
+	if it.Link != srv.URL+"/detail/1.html" {
+		t.Errorf("Link = %v, want 条目自身 @data-url 取值并补全", it.Link)
+	}
+	if it.PublishedParsed == nil || it.PublishedParsed.Format("2006-01-02") != "2026-09-01" {
+		t.Errorf("PublishedParsed = %v, want .pub@data-time 取 2026-09-01", it.PublishedParsed)
+	}
+}
+
+// @ 语法取子元素属性（a@data-url）；@ 属性不存在时回退默认行为
+func TestHtmlSourceSelectorAttrOnChildAndFallback(t *testing.T) {
+	srv := serveHTML(t, `<!DOCTYPE html>
+<html><head><title>回退</title></head>
+<body>
+<ul class="list">
+	<li class="item"><a href="/ok.html" data-url="/real.html">链接文本不是标题</a></li>
+	<li class="item"><a href="/plain.html">纯链接条目</a></li>
+</ul>
+</body></html>`)
+
+	// link_selector 用 a@data-url：第一条命中属性，第二条无该属性应回退默认 href
+	config := `{"url":"` + srv.URL + `","item_selector":".item","link_selector":"a@data-url"}`
+	src, err := NewHtmlSource("", config)
+	if err != nil {
+		t.Fatalf("NewHtmlSource() error = %v", err)
+	}
+
+	feed, err := src.FetchAndParse(context.Background())
+	if err != nil {
+		t.Fatalf("FetchAndParse() error = %v", err)
+	}
+	if len(feed.Items) != 2 {
+		t.Fatalf("len(Items) = %v, want 2", len(feed.Items))
+	}
+	if feed.Items[0].Link != srv.URL+"/real.html" {
+		t.Errorf("Items[0].Link = %v, want a@data-url 取值", feed.Items[0].Link)
+	}
+	if feed.Items[1].Link != srv.URL+"/plain.html" {
+		t.Errorf("Items[1].Link = %v, want 属性缺失回退默认 href", feed.Items[1].Link)
 	}
 }

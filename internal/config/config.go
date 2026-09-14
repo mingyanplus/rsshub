@@ -49,6 +49,34 @@ type Config struct {
 	EventMatcher EventMatcherConfig `mapstructure:"event_matcher"`
 	Proxy        ProxyConfig        `mapstructure:"proxy"`
 	Prompts      PromptsConfig      `mapstructure:"prompts"`
+	Topics       TopicsConfig       `mapstructure:"topics"`
+	DataBackup   DataBackupConfig   `mapstructure:"data_backup"`
+}
+
+// DataBackupConfig 数据库自动备份配置（VACUUM INTO 快照存至库文件同目录 backups/ 下）
+type DataBackupConfig struct {
+	AutoEnable bool          `mapstructure:"auto_enable"` // 定时自动备份开关
+	Interval   time.Duration `mapstructure:"interval"`    // 备份间隔（距最近一次备份文件超过该时长才触发）
+	MaxFiles   int           `mapstructure:"max_files"`   // 备份文件保留上限，超出自动删除最旧的
+}
+
+// 数据备份默认值：viper SetDefault 与 server 包的运行时回退共用，避免散布多处的常量漂移
+const (
+	DefaultBackupInterval  = 24 * time.Hour
+	DefaultMaxBackupFiles = 7
+)
+
+// TopicsConfig 话题聚合配置
+type TopicsConfig struct {
+	// Categories 频道分类规则，按序匹配首个命中；留空用内置默认
+	// （科技/AI/财经/国际/社会/生活/健康/教育/其他）
+	Categories []TopicCategoryConfig `mapstructure:"categories"`
+}
+
+// TopicCategoryConfig 频道分类规则：AI 细粒度分类含任一关键词（子串匹配，逗号分隔）即归入该频道
+type TopicCategoryConfig struct {
+	Name     string `mapstructure:"name"`
+	Keywords string `mapstructure:"keywords"`
 }
 
 // PromptsConfig 提示词覆盖（留空使用程序内置默认，设置页可编辑）
@@ -70,7 +98,8 @@ type ServerConfig struct {
 	Port            int    `mapstructure:"port"`
 	RefreshInterval int    `mapstructure:"refresh_interval"` // RSS 刷新间隔（分钟），默认30
 	Timezone        string `mapstructure:"timezone"`         // 显示时区，如 "Asia/Shanghai" 或 "Local"
-	Password        string `mapstructure:"password"`         // Web 登录密码，留空则不启用登录
+	Password        string `mapstructure:"password"`         // Web 登录密码（管理员），留空则不启用登录
+	ReaderPassword  string `mapstructure:"reader_password"`  // 阅读密码（访客只读：可浏览文章/话题/报告，不可管理订阅/规则/设置/数据），留空不启用
 	LogLevel        string `mapstructure:"log_level"`        // 日志级别: DEBUG, INFO, WARN, ERROR
 	LogMaxLineLen   int    `mapstructure:"log_max_line_len"` // 单行最大长度（0不限制）
 }
@@ -452,6 +481,8 @@ func SaveReportConfig(reportType string, enabled bool) error {
 
 // setDefaults 设置默认值
 func setDefaults(v *viper.Viper, cfg *Config) {
+	v.SetDefault("data_backup.interval", DefaultBackupInterval)
+	v.SetDefault("data_backup.max_files", DefaultMaxBackupFiles)
 	v.SetDefault("server.host", cfg.Server.Host)
 	v.SetDefault("server.port", cfg.Server.Port)
 	v.SetDefault("server.timezone", cfg.Server.Timezone)

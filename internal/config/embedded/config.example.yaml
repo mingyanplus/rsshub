@@ -6,6 +6,7 @@ server:
   port: 8080
   # Web 登录密码（留空则不启用登录校验）
   password: ""
+  reader_password: ""           # 阅读密码：访客只读（仅浏览），留空不启用
   log_level: "INFO"       # 日志级别: DEBUG, INFO, WARN, ERROR
   log_max_line_len: 500 # 单行最大长度，0 表示不限制
 
@@ -93,6 +94,21 @@ push:
     enabled: false
     webhook_url: ""    # 完整 webhook 地址，如 https://oapi.dingtalk.com/robot/send?access_token=xxx
     secret: ""         # 加签密钥（安全设置为"加签"时必填，其他模式留空）
+
+# 话题聚合配置（话题页频道分类；修改后重启生效）
+# topics:
+#   categories:                   # 按序匹配首个命中，AI 细粒度分类含任一关键词（子串匹配）即归入该频道
+#     - name: 教育
+#       keywords: "教育,学校,考试,招生,高考,中考,考研,留学,校园,学术"
+#     - name: 科技
+#       keywords: "科技,技术,软件,硬件,互联网,编程,工程,科学"
+#     # 省略整个 topics 节（或 categories 留空）= 使用内置默认规则
+
+# 数据库自动备份（VACUUM INTO 快照存至库文件同目录 backups/ 下，超出上限自动删最旧）
+data_backup:
+  auto_enable: false
+  interval: 24h          # 距最近一次备份超过该时长才触发（调度器每 5 分钟检查一次）
+  max_files: 7           # 备份文件保留上限
 
 # 事件匹配器配置
 event_matcher:

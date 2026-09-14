@@ -73,32 +73,48 @@ func ApplyContentFilter(content, rules string) string {
 	return strings.Join(kept, "\n")
 }
 
-// FetchFeed 从 URL 获取 RSS 内容
-func FetchFeed(ctx context.Context, url string) ([]byte, error) {
+// fetchBytes GET 抓取并返回响应体与 Content-Type 头（编码识别需要头信息），
+// 供 FetchFeed / FetchHTMLText 共用；HTTP 策略（UA/超时/状态码检查）集中在此一处
+func fetchBytes(ctx context.Context, url, accept string) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", "RSS-AI-Reader/1.0")
-	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/json, text/xml, */*")
+	req.Header.Set("Accept", accept)
 
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch feed: %w", err)
+		return nil, "", fmt.Errorf("failed to fetch %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("feed returned status %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("%s returned status %d", url, resp.StatusCode)
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, "", fmt.Errorf("failed to read response body: %w", err)
 	}
+	return data, resp.Header.Get("Content-Type"), nil
+}
 
-	return data, nil
+// FetchFeed 从 URL 获取 RSS 内容
+func FetchFeed(ctx context.Context, url string) ([]byte, error) {
+	data, _, err := fetchBytes(ctx, url, "application/rss+xml, application/atom+xml, application/json, text/xml, */*")
+	return data, err
+}
+
+// FetchHTMLText 抓取 HTML 页面并解码为 UTF-8 文本（HTML 源列表抓取专用）。
+// explicitEncoding 手动指定编码；为空时自动识别：HTTP 头 charset → BOM → 页面 meta 声明 → UTF-8
+func FetchHTMLText(ctx context.Context, pageURL, explicitEncoding string) (string, error) {
+	data, contentType, err := fetchBytes(ctx, pageURL, "text/html, */*")
+	if err != nil {
+		return "", err
+	}
+	return DecodeToUTF8(data, explicitEncoding, contentType), nil
 }
 
 // FetchAndParse 从 URL 获取并解析 RSS

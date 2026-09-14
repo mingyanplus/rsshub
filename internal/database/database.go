@@ -292,6 +292,9 @@ CREATE TABLE IF NOT EXISTS report_articles (
 	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_articles_fetched_at ON articles(fetched_at)`)
 	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at)`)
 	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_articles_keywords ON articles(keywords)`)
+	// 部分索引：只索引有向量的行，COUNT 统计直接数索引条目（免全表扫描大 blob 列）
+	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_articles_has_embedding ON articles(id) WHERE embedding IS NOT NULL`)
+	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_articles_has_summary_embedding ON articles(id) WHERE summary_embedding IS NOT NULL`)
 	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_articles_importance_score ON articles(importance_score)`)
 	// 复合索引：用于获取待分析文章
 	d.db.Exec(`CREATE INDEX IF NOT EXISTS idx_articles_keywords_fetched ON articles(keywords, fetched_at)`)

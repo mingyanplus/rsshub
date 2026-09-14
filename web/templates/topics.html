@@ -11,10 +11,6 @@
             <a href="/topics?category={{.}}"
                class="px-3 py-1 rounded-lg text-sm {{if eq $.SelectedCategory .}}bg-blue-500 text-white{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}">{{.}}</a>
             {{end}}
-            <button onclick="rebuildTopics(this)"
-                    class="ml-auto text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 transition disabled:opacity-50">
-                🤖 从近 30 天文章重建话题
-            </button>
         </div>
 
         <!-- 话题列表（桌面端点击在右侧预览，移动端跳转详情页） -->
@@ -218,26 +214,4 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <style>
 .topic-card.selected-topic { border-color: #1a6b3c; background: #f0f7f2; }
-</style>
-<script>
-// 从存量文章重建话题（异步，需数分钟）
-async function rebuildTopics(btn) {
-    if (!confirm('将清空现有话题，从近 30 天已分析的文章重新聚合（多源话题会调用 AI 生成综合摘要，可能产生少量 API 费用）。确定继续？')) return;
-    btn.disabled = true;
-    const old = btn.textContent;
-    btn.textContent = '⏳ 重建中，完成后刷新页面查看…';
-    try {
-        const res = await fetch('/api/topics/rebuild?days=30', { method: 'POST' });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        alert(`已开始重建，共 ${data.articles} 篇文章。聚合在后台进行，稍后刷新本页查看话题流。`);
-        setTimeout(() => location.reload(), 15000);
-    } catch (err) {
-        alert('重建失败：' + err.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = old;
-    }
-}
-</script>
-{{end}}
+</style>{{end}}

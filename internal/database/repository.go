@@ -109,6 +109,12 @@ func (d *DB) UpdateFeedLastFetched(id int64) error {
 	return err
 }
 
+// UpdateFeedTitle 更新订阅源标题（添加源时标题留空，首次抓取自动补齐）
+func (d *DB) UpdateFeedTitle(id int64, title string) error {
+	_, err := d.db.Exec(`UPDATE feeds SET title = ? WHERE id = ?`, title, id)
+	return err
+}
+
 // CreateArticle 创建文章
 func (d *DB) CreateArticle(article *models.Article) (int64, error) {
 	// 清理HTML用于列表显示（存入ai_summary）
@@ -1051,6 +1057,12 @@ func (d *DB) GetStats() (map[string]int, error) {
 	// 总文章数
 	d.db.QueryRow(`SELECT COUNT(*) FROM articles`).Scan(&val)
 	stats["total_articles"] = val
+
+	// 向量数据条数（文章向量 + 总结向量；有部分索引支撑，见建库处的 idx_articles_has_*）
+	d.db.QueryRow(`SELECT COUNT(embedding) FROM articles`).Scan(&val)
+	stats["embedding_count"] = val
+	d.db.QueryRow(`SELECT COUNT(summary_embedding) FROM articles`).Scan(&val)
+	stats["summary_embedding_count"] = val
 
 	return stats, nil
 }

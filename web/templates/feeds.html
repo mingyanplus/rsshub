@@ -168,19 +168,19 @@
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs font-medium text-gray-600 mb-1">标题选择器</label>
-                            <input type="text" id="html-title-selector" placeholder="h2 a"
+                            <input type="text" id="html-title-selector" placeholder="h2 a；取属性写 img@alt"
                                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-gray-600 mb-1">链接选择器</label>
-                            <input type="text" id="html-link-selector" placeholder="h2 a"
+                            <input type="text" id="html-link-selector" placeholder="h2 a；取属性写 a@data-url"
                                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs font-medium text-gray-600 mb-1">日期选择器</label>
-                            <input type="text" id="html-date-selector" placeholder="span.date"
+                            <input type="text" id="html-date-selector" placeholder="span.date；取属性写 time@datetime"
                                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
                         </div>
                         <div>
@@ -192,6 +192,11 @@
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Base URL（用于相对链接补全）</label>
                         <input type="text" id="html-base-url" placeholder="留空则使用页面 URL"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">页面编码</label>
+                        <input type="text" id="html-encoding" placeholder="留空自动识别；乱码时可填 gbk / gb2312 / gb18030 / big5"
                                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-purple-400">
                     </div>
                 </div>
@@ -391,6 +396,7 @@ function buildSourceConfig() {
         if (document.getElementById('html-date-selector').value.trim()) config.date_selector = document.getElementById('html-date-selector').value.trim();
         if (document.getElementById('html-content-selector').value.trim()) config.content_selector = document.getElementById('html-content-selector').value.trim();
         if (document.getElementById('html-base-url').value.trim()) config.base_url = document.getElementById('html-base-url').value.trim();
+        if (document.getElementById('html-encoding').value.trim()) config.encoding = document.getElementById('html-encoding').value.trim();
         return config;
     }
     if (type === 'json') {
@@ -448,6 +454,12 @@ function testSource() {
         if (data.error) {
             resultDiv.innerHTML = '<div class="p-2 bg-red-50 text-red-700 text-sm rounded">' + data.error + '</div>';
             return;
+        }
+
+        // 标题留空时用抓到的源标题自动回填，保存前即可见可改（手动填写的不覆盖）
+        const titleInput = document.getElementById('feed-title');
+        if (data.title && !titleInput.value.trim()) {
+            titleInput.value = data.title;
         }
 
         let html = '<div class="p-2 bg-green-50 text-green-700 text-sm rounded mb-2">✅ 提取成功，共 ' + (data.item_count || 0) + ' 条结果</div>';
@@ -522,7 +534,7 @@ function showAddFeedModal() {
     document.getElementById('test-result').classList.add('hidden');
     // 重置所有自定义字段
     ['html-item-selector','html-title-selector','html-link-selector','html-date-selector',
-     'html-content-selector','html-base-url','json-items-path','json-title-field',
+     'html-content-selector','html-base-url','html-encoding','json-items-path','json-title-field',
      'json-link-field','json-date-field','json-content-field','json-body','json-headers',
      'curl-command'].forEach(id => {
         const el = document.getElementById(id);
@@ -574,6 +586,7 @@ function editFeed(id) {
                         if (config.date_selector) document.getElementById('html-date-selector').value = config.date_selector;
                         if (config.content_selector) document.getElementById('html-content-selector').value = config.content_selector;
                         if (config.base_url) document.getElementById('html-base-url').value = config.base_url;
+                        if (config.encoding) document.getElementById('html-encoding').value = config.encoding;
                     } else if (sourceType === 'json') {
                         if (config.method) document.getElementById('json-method').value = config.method;
                         if (config.body) document.getElementById('json-body').value = config.body;

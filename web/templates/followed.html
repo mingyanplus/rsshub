@@ -1,58 +1,38 @@
 {{define "content"}}
 <style>
-/* 文章卡片悬停浮动效果 */
-.article-card {
-    position: relative;
-    z-index: 1;
-    break-inside: avoid;
-}
-.article-card:hover {
-    z-index: 50;
-}
-.article-card .hover-expand {
-    display: none;
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 0;
-    background: white;
-    border-radius: 2px;
-    box-shadow: 0 4px 16px rgba(28, 27, 25, 0.12), 0 1px 3px rgba(28, 27, 25, 0.08);
-    padding: 12px;
-    z-index: 100;
-    border: 1px solid #b7d5c4;
-    border-left: 2px solid #1a6b3c;
-}
-.article-card:hover .hover-expand {
-    display: block;
-}
-/* 已读文章弱化样式 */
+/* 已读文章弱化样式（与文章列表页一致） */
 .article-card.read {
     opacity: 0.55;
 }
-.article-card.read .card-content h2 {
+.article-card.read h2 {
     font-weight: 400;
     color: #78716c;
 }
 .article-card.read:hover {
     opacity: 0.85;
 }
+/* 选中卡片（品牌绿高亮，与文章列表/话题流同款） */
+.article-card.selected-card {
+    border-color: #1a6b3c;
+    background: #f0f7f2;
+}
+/* 文章预览正文：加大行间距与段间距（与文章列表页一致） */
+{{template "preview-body-styles"}}
 </style>
-<div class="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-8rem)]">
-    <!-- 左侧：文章列表 -->
-    <div class="w-full md:w-[420px] flex-shrink-0 flex flex-col">
+<!-- 与文章列表页同构的分栏：左列表（2）+ 右预览（3），lg 以下预览转底部弹窗 -->
+<div class="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-6">
+    <!-- 左栏：规则标题 + 文章列表 -->
+    <div class="min-w-0">
         <!-- 规则标题 -->
-        <div class="bg-white rounded-xl shadow-sm p-3 mb-3">
-            <div class="flex items-center gap-2">
-                <span class="text-lg">⭐</span>
-                <h2 class="font-semibold text-gray-800" id="rule-name">{{.RuleName}}</h2>
-                <a href="/rules" class="ml-auto text-sm text-blue-500 hover:underline">返回规则列表</a>
-            </div>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-3 mb-3 flex items-center gap-2">
+            <span class="text-lg">⭐</span>
+            <h2 class="font-semibold text-gray-800" id="rule-name">{{.RuleName}}</h2>
+            <a href="/rules" class="ml-auto text-sm text-blue-500 hover:underline">返回规则列表</a>
         </div>
 
-        <!-- 文章列表 -->
-        <div class="flex-1 md:min-h-0 overflow-y-auto pr-2">
-            <div id="articles-grid" class="columns-1 gap-3">
+        <!-- 文章列表（页面级滚动 + 无限加载） -->
+        <div id="articles-scroll" class="pr-1">
+            <div id="articles-grid" class="space-y-4">
                 <!-- 文章卡片将通过 JS 动态加载 -->
             </div>
 
@@ -81,23 +61,38 @@
         </div>
     </div>
 
-    <!-- 右侧：文章预览栏 -->
-    <div class="flex-1 flex flex-col min-w-0">
-        <div class="bg-white rounded-xl shadow-sm flex-1 md:overflow-hidden flex flex-col" id="article-preview">
+    <!-- 右栏：文章预览（桌面 sticky 面板；手机底部弹窗，同一 DOM 响应式切换） -->
+    <div id="preview-col"
+         class="hidden fixed inset-0 z-40 bg-black/50 items-end
+                lg:static lg:z-auto lg:block lg:bg-transparent">
+        <div id="article-preview"
+             class="bg-white w-full max-h-[88vh] rounded-t-2xl shadow-xl overflow-y-auto
+                    lg:max-h-none lg:rounded-xl lg:border lg:border-gray-100 lg:shadow-sm
+                    lg:sticky lg:top-20 lg:h-[calc(100vh-6.5rem)]">
+            <!-- 手机端弹窗头部（桌面隐藏） -->
+            <div class="lg:hidden sticky top-0 z-10 bg-white border-b border-gray-100 flex items-center justify-between px-4 py-3">
+                <h3 class="font-semibold text-gray-800">文章详情</h3>
+                <button onclick="closeFlwPreviewModal()" aria-label="关闭" class="text-gray-400 hover:text-gray-600 p-1 -mr-1">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
             <!-- 默认空状态 -->
-            <div id="preview-empty" class="flex-1 flex items-center justify-center text-gray-400">
+            <div id="preview-empty" class="flex-1 flex items-center justify-center text-gray-400 py-24">
                 <div class="text-center">
                     <div class="text-5xl mb-4">📖</div>
                     <p>选择一篇文章查看详情</p>
                 </div>
             </div>
             <!-- 文章内容区域 -->
-            <div id="preview-content" class="hidden flex-1 flex flex-col md:overflow-hidden">
+            <div id="preview-content" class="hidden flex flex-col">
                 <!-- 头部信息 -->
                 <div class="p-6 border-b border-gray-100 flex-shrink-0">
-                    <div class="flex items-center justify-between mb-3">
-                        <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                        <div class="flex items-center gap-2 min-w-0">
                             <span id="preview-rule" class="text-sm bg-yellow-100 text-yellow-700 px-2 py-1 rounded">⭐ 规则</span>
+                            <span id="preview-source" class="text-sm text-gray-500 truncate"></span>
                         </div>
                         <div class="flex items-center gap-2">
                             <a id="preview-link" href="#" target="_blank"
@@ -107,7 +102,6 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-2 mb-2">
-                        <span id="preview-source" class="text-sm text-gray-500"></span>
                         <span id="preview-time" class="text-sm text-gray-400"></span>
                     </div>
                     <h1 id="preview-title" class="text-xl font-bold text-gray-900 mb-3"></h1>
@@ -120,7 +114,7 @@
                     </div>
                 </div>
                 <!-- 文章正文 -->
-                <div class="md:flex-1 md:overflow-y-auto p-6">
+                <div class="p-6">
                     <div id="flw-translate-toggle-container" class="hidden mb-3">
                         <button id="flw-translate-toggle" onclick="toggleFlwTranslation()" class="text-sm bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 transition cursor-pointer">
                             查看中文翻译
@@ -146,6 +140,29 @@ let hasMore = true;
 let selectedArticleId = null;
 const pageSize = 20;
 const ruleFilter = "{{.SelectedRule}}";
+const isFlwDesktop = () => window.matchMedia('(min-width: 1024px)').matches;
+
+// ===== 手机端预览弹窗（与文章列表页同款底部抽屉） =====
+function openFlwPreviewModal() {
+    const col = document.getElementById('preview-col');
+    col.classList.remove('hidden');
+    col.classList.add('flex');
+    document.body.classList.add('overflow-hidden'); // 锁定背景滚动
+    document.getElementById('article-preview').scrollTop = 0;
+}
+function closeFlwPreviewModal() {
+    const col = document.getElementById('preview-col');
+    col.classList.add('hidden');
+    col.classList.remove('flex');
+    document.body.classList.remove('overflow-hidden');
+}
+// ESC / 点遮罩关闭（仅手机弹窗形态；桌面预览常驻不响应）
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !isFlwDesktop()) closeFlwPreviewModal();
+});
+document.getElementById('preview-col').addEventListener('click', e => {
+    if (e.target === e.currentTarget && !isFlwDesktop()) closeFlwPreviewModal();
+});
 
 // 加载文章
 async function loadArticles(append = false) {
@@ -210,41 +227,21 @@ async function loadArticles(append = false) {
     }
 }
 
-// 创建文章卡片 HTML
+// 创建文章卡片 HTML（与文章列表页卡片同款样式）
 function createArticleCard(article) {
+    const summary = article.ai_summary || article.summary || '';
     const time = article.published_at || '';
-    // 优先使用 ai_summary，没有则使用 summary 并清理 HTML
-    let summary = article.ai_summary || article.summary || '';
-    // 如果 summary 包含 HTML 标签，简单清理
-    if (summary && !article.ai_summary) {
-        summary = summary.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-    }
-    const shortSummary = summary.length > 100 ? summary.substring(0, 100) + '...' : summary;
-
-    const readClass = article.is_read ? ' read' : '';
-    const readBadge = article.is_read ? '<span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">已读</span>' : '<span class="text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">未读</span>';
+    const readClass = article.is_read ? 'read' : '';
 
     return `
-    <article class="article-card${readClass} group relative bg-white rounded-lg shadow-sm transition-all duration-200 cursor-pointer border border-transparent mb-3"
+    <article class="article-card ${readClass} bg-white rounded-xl shadow-sm border border-gray-100 p-4 cursor-pointer transition hover:border-gray-300"
              data-article-id="${article.id}"
              onclick="selectArticle(${article.id}, this)">
-        <div class="card-content p-3">
-            <h2 class="text-sm font-semibold text-gray-900 mb-1.5 line-clamp-2">${escapeHtml(article.title)}</h2>
-            <p class="text-gray-500 text-xs line-clamp-3 mb-2">${escapeHtml(shortSummary)}</p>
-            <div class="flex items-center gap-2 text-xs text-gray-400">
-                <span>📰 ${article.feed_name || ''}</span>
-                <span>📅 ${time}</span>
-
-            </div>
-        </div>
-        <div class="hover-expand">
-            <h2 class="text-sm font-semibold text-gray-900 mb-1.5">${escapeHtml(article.title)}</h2>
-            <p class="text-gray-500 text-xs mb-2">${escapeHtml(summary)}</p>
-            <div class="flex items-center gap-2 text-xs text-gray-400">
-                <span>📰 ${article.feed_name || ''}</span>
-                <span>📅 ${time}</span>
-
-            </div>
+        <h2 class="text-[15px] font-semibold text-gray-900 leading-snug">${escapeHtml(article.title)}</h2>
+        <p class="text-sm text-gray-600 mt-2 leading-6 line-clamp-2">${escapeHtml(summary)}</p>
+        <div class="flex items-center gap-2 text-xs text-gray-400 mt-2 flex-wrap">
+            <span class="truncate max-w-[180px]">📰 ${escapeHtml(article.feed_name || '')}</span>
+            <span class="tabular-nums">📅 ${time}</span>
         </div>
     </article>`;
 }
@@ -257,13 +254,14 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 选中文章
+// 选中文章（手机端以弹窗预览，桌面右栏预览；品牌绿高亮与文章列表页一致）
 function selectArticle(id, element) {
     document.querySelectorAll('#articles-grid article').forEach(el => {
-        el.classList.remove('bg-blue-50');
+        el.classList.remove('selected-card');
     });
-    element.classList.add('bg-blue-50');
+    element.classList.add('selected-card');
     selectedArticleId = id;
+    if (!isFlwDesktop()) openFlwPreviewModal();
     loadArticlePreview(id);
     markAsRead(id, element);
 }
@@ -272,8 +270,6 @@ function selectArticle(id, element) {
 function markAsRead(id, element) {
     if (element.classList.contains('read')) return; // 已经是已读
     element.classList.add('read');
-    element.classList.remove('bg-blue-50');
-    element.classList.add('bg-blue-50');
     fetch(`/api/articles/${id}/read`, { method: 'POST' }).catch(() => {});
 }
 
@@ -387,15 +383,14 @@ async function fetchFlwOriginalContent() {
     }
 }
 
-// 无限滚动 - Intersection Observer
-const scrollContainer = document.querySelector('.flex-1.overflow-y-auto');
+// 无限滚动 - Intersection Observer（列表随页面滚动，root 用默认视口，与文章列表页一致）
 const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
         if (entry.isIntersecting && hasMore && !isLoading) {
             loadArticles(true);
         }
     });
-}, { root: scrollContainer, rootMargin: '100px' });
+}, { rootMargin: '600px' });
 
 observer.observe(document.getElementById('load-more-trigger'));
 

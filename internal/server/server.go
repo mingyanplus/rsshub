@@ -177,6 +177,8 @@ type PageData struct {
 	Title      string
 	PageTitle  string
 	Active     string
+	// IsAdmin 当前会话是否管理员（阅读密码登录的访客为 false，模板据此隐藏管理入口）
+	IsAdmin bool
 	Categories []CategoryData
 	Tags       []TagData
 	Feeds      []FeedData
@@ -270,6 +272,7 @@ type SettingsData struct {
 	ProxyEnableLLM        bool
 	ProtectFetchOriginal  bool
 	ServerPassword        string
+	ReaderPassword        string
 	PromptAnalyzeSystem   string
 	PromptTranslateSystem string
 }
@@ -358,11 +361,11 @@ type StatsData struct {
 	TotalFeeds      int
 	PendingArticles int
 	AdArticles      int
-	DatabaseSize    string
-	TotalArticles   int
-	EmbeddingCount  int
-	LastBackup      string
-	AdArticlesCount int
+	DatabaseSize          string
+	TotalArticles         int
+	EmbeddingCount        int
+	SummaryEmbeddingCount int
+	LastBackup            string
 }
 
 // Router HTTP 路由器
@@ -396,48 +399,42 @@ func NewRouter() *Router {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
 
-	// 前端页面
+	// 前端页面：访客（阅读密码登录）可浏览的板块
 	r.Get("/", IndexPage)
-	r.Get("/feeds", FeedsPage)
 	r.Get("/articles", ArticlesPage)
 	r.Get("/categories", CategoriesPage)
 	r.Get("/tags", TagsPage)
-	r.Get("/rules", RulesPage)
-	r.Get("/followed", FollowedPage)
 	r.Get("/reports", ReportsPage)
-	r.Get("/settings", SettingsPage)
-	r.Get("/data", DataPage)
 	r.Get("/events", EventsPage)
 	r.Get("/topics", TopicsPage)
 	r.Get("/topics/{id}", TopicDetailPage)
 
+	// 管理页面（管理员）：订阅/规则/关注文章/设置/数据管理
+	r.Group(func(r chi.Router) {
+		r.Use(AdminMiddleware)
+		r.Get("/feeds", FeedsPage)
+		r.Get("/rules", RulesPage)
+		r.Get("/followed", FollowedPage)
+		r.Get("/settings", SettingsPage)
+		r.Get("/data", DataPage)
+	})
+
 	// API 路由
+	// 注意：这里列出的接口对访客（阅读密码登录）开放；新增管理类接口务必放进
+	// 下方的管理员组，误加到此处 = 静默提权
 	r.Route("/api", func(r chi.Router) {
+		// ===== 访客可用：阅读与浏览类（GET 查询 + 阅读行为上报） =====
 		// 话题
-		r.Post("/topics/rebuild", RebuildTopics)
-		r.Post("/topics/{id}/to-event", ConvertTopicToEvent)
 		r.Get("/topics/{id}/detail", TopicDetailJSON)
 		r.Post("/topics/{id}/behavior", ReportTopicBehavior)
-
-		// Feed 管理
-		r.Get("/feeds", ListFeeds)
-		r.Post("/feeds", CreateFeed)
-		r.Get("/feeds/{id}", GetFeed)
-		r.Put("/feeds/{id}", UpdateFeed)
-		r.Delete("/feeds/{id}", DeleteFeed)
-		r.Post("/feeds/{id}/refresh", RefreshFeed)
-		r.Post("/feeds/refresh-all", RefreshAllFeeds)
-		r.Post("/feeds/test-source", TestSource)
-		r.Post("/feeds/parse-curl", ParseCurl)
 
 		// 行为采集（推荐系统 P1：曝光异步批量上报）
 		r.Post("/behavior/exposures", ReportExposures)
 
 		// 推荐列表（P3：多因子打分 + 推荐理由；P5：curated/discover 双模式）
 		r.Get("/recommendations", GetRecommendations)
-		r.Get("/recommendations/metrics", GetRecommendationMetrics)
 
-		// 文章列表
+		// 文章列表与阅读行为
 		r.Get("/articles", ListArticles)
 		r.Get("/articles/html", ListArticlesHTML)
 		r.Post("/articles/{id}/fetch-original", FetchOriginalContent)
@@ -446,93 +443,131 @@ func NewRouter() *Router {
 		r.Post("/articles/{id}/favorite", ToggleArticleFavorite)
 		r.Post("/articles/{id}/not-interested", MarkArticleNotInterested)
 		r.Get("/articles/{id}", GetArticle)
-		r.Post("/articles/process-pending", ProcessPendingArticles)
-		r.Post("/articles/retry-failed", RetryFailedArticles)
-		r.Post("/articles/{id}/retry", RetryArticleProcess)
-		r.Post("/articles/regenerate-summary-embeddings", RegenerateSummaryEmbeddings)
-		r.Post("/articles/reanalyze-for-summary", ReanalyzeArticlesForSummary)
 
-		// 分类管理
+		// 分类/标签浏览
 		r.Get("/categories", ListCategories)
-		r.Post("/categories", CreateCategory)
 		r.Get("/categories/{id}", GetCategory)
-		r.Put("/categories/{id}", UpdateCategory)
-		r.Delete("/categories/{id}", DeleteCategory)
-
-		// 标签管理
 		r.Get("/tags", ListTags)
 		r.Get("/tags/{id}", GetTag)
-		r.Put("/tags/{id}", UpdateTag)
-		r.Delete("/tags/{id}", DeleteTag)
 
-		// 关注规则
-		r.Get("/rules", ListRules)
-		r.Post("/rules", CreateRule)
-		r.Get("/rules/{id}", GetRule)
-		r.Put("/rules/{id}", UpdateRule)
-		r.Delete("/rules/{id}", DeleteRule)
-		r.Post("/rules/{id}/toggle", ToggleRule)
-		r.Post("/rules/check-push", CheckFollowRulesPush)
-		r.Delete("/rules/{id}/push-records", ClearRulePushRecords)
-
-		// 关注规则匹配的文章
-		r.Get("/followed", ListFollowedArticles)
-
-		// 报告
+		// 报告浏览
 		r.Get("/reports", ListReports)
-		r.Post("/reports/generate", GenerateReport)
 		r.Get("/reports/latest", GetLatestReport)
 		r.Get("/reports/{id}", GetReport)
 		r.Get("/reports/{id}/full", GetFullReport)
-		r.Post("/reports/resend", ResendReport)
-		r.Post("/reports/config", UpdateReportConfig)
-
-		// 数据管理
-		r.Post("/data/export", ExportData)
-		r.Post("/data/import", ImportData)
-		r.Post("/data/cleanup", CleanupData)
-		r.Post("/data/reset", ResetData)
-		r.Post("/data/vacuum", VacuumDB)
 
 		// 搜索
 		r.Get("/search", SearchArticles)
 
-		// 设置
-		r.Post("/settings", SaveSettings)
-		r.Post("/settings/test", TestSettingsConnection)
-		r.Post("/settings/models", FetchModels)
-
-		// 配置重载
-		r.Post("/config/reload", ReloadConfig)
-		r.Get("/config", GetConfig)
-
-		// 主题模板管理
-		r.Get("/topic-prompts", ListTopicPrompts)
-		r.Post("/topic-prompts", CreateTopicPrompt)
-		r.Get("/topic-prompts/{id}", GetTopicPrompt)
-		r.Put("/topic-prompts/{id}", UpdateTopicPrompt)
-		r.Delete("/topic-prompts/{id}", DeleteTopicPrompt)
-
-		// 事件追踪管理
+		// 事件追踪浏览（AI 功能）
 		r.Get("/events", ListEventTracks)
-		r.Post("/events", CreateEventTrack)
-		r.Get("/events/pending", ListPendingEvents)
 		r.Get("/events/{id}", GetEventTrack)
-		r.Put("/events/{id}", UpdateEventTrack)
-		r.Delete("/events/{id}", DeleteEventTrack)
-		r.Post("/events/{id}/activate", ActivateEventTrack)
-		r.Post("/events/{id}/pause", PauseEventTrack)
-		r.Post("/events/{id}/complete", CompleteEventTrack)
-		r.Post("/events/{id}/match", MatchSingleEventArticles)
 		r.Get("/events/{id}/articles", GetEventArticles)
 		r.Get("/events/{id}/stats", GetEventStats)
-		r.Post("/events/{id}/optimize", OptimizeEventDescription)
-		r.Post("/events/{id}/check-quality", CheckEventMatchQuality)
 
-		// 热点检测和生命周期管理
-		r.Post("/events/detect-hot-topics", DetectHotTopics)
-		r.Post("/events/auto-pause-inactive", AutoPauseInactiveEvents)
-		r.Post("/events/match-articles", MatchArticlesToEvents)
+		// ===== 管理员：内容管理与系统配置类 =====
+		r.Group(func(r chi.Router) {
+			r.Use(AdminMiddleware)
+
+			// 话题重建与导出
+			r.Post("/topics/rebuild", RebuildTopics)
+			r.Post("/topics/{id}/to-event", ConvertTopicToEvent)
+
+			// Feed 管理
+			r.Get("/feeds", ListFeeds)
+			r.Post("/feeds", CreateFeed)
+			r.Get("/feeds/{id}", GetFeed)
+			r.Put("/feeds/{id}", UpdateFeed)
+			r.Delete("/feeds/{id}", DeleteFeed)
+			r.Post("/feeds/{id}/refresh", RefreshFeed)
+			r.Post("/feeds/refresh-all", RefreshAllFeeds)
+			r.Post("/feeds/test-source", TestSource)
+			r.Post("/feeds/parse-curl", ParseCurl)
+
+			// 文章批量处理（触发 AI 分析，产生费用）
+			r.Post("/articles/process-pending", ProcessPendingArticles)
+			r.Post("/articles/retry-failed", RetryFailedArticles)
+			r.Post("/articles/{id}/retry", RetryArticleProcess)
+			r.Post("/articles/regenerate-summary-embeddings", RegenerateSummaryEmbeddings)
+			r.Post("/articles/reanalyze-for-summary", ReanalyzeArticlesForSummary)
+
+			// 推荐指标看板（管理性质）
+			r.Get("/recommendations/metrics", GetRecommendationMetrics)
+
+			// 分类管理
+			r.Post("/categories", CreateCategory)
+			r.Put("/categories/{id}", UpdateCategory)
+			r.Delete("/categories/{id}", DeleteCategory)
+
+			// 标签管理
+			r.Put("/tags/{id}", UpdateTag)
+			r.Delete("/tags/{id}", DeleteTag)
+
+			// 关注规则
+			r.Get("/rules", ListRules)
+			r.Post("/rules", CreateRule)
+			r.Get("/rules/{id}", GetRule)
+			r.Put("/rules/{id}", UpdateRule)
+			r.Delete("/rules/{id}", DeleteRule)
+			r.Post("/rules/{id}/toggle", ToggleRule)
+			r.Post("/rules/check-push", CheckFollowRulesPush)
+			r.Delete("/rules/{id}/push-records", ClearRulePushRecords)
+
+			// 关注规则匹配的文章
+			r.Get("/followed", ListFollowedArticles)
+
+			// 报告生成与配置
+			r.Post("/reports/generate", GenerateReport)
+			r.Post("/reports/resend", ResendReport)
+			r.Post("/reports/config", UpdateReportConfig)
+
+			// 数据管理
+			r.Post("/data/export", ExportData)
+			r.Post("/data/import", ImportData)
+			r.Post("/data/cleanup", CleanupData)
+			r.Post("/data/reset", ResetData)
+			r.Post("/data/vacuum", VacuumDB)
+
+			// 数据库备份
+			r.Post("/data/backup", BackupDB)
+			r.Get("/data/backups", ListBackups)
+			r.Post("/data/backup-config", UpdateBackupConfig)
+			r.Get("/data/backups/{name}", DownloadBackup)
+			r.Delete("/data/backups/{name}", DeleteBackup)
+
+			// 设置
+			r.Post("/settings", SaveSettings)
+			r.Post("/settings/test", TestSettingsConnection)
+			r.Post("/settings/models", FetchModels)
+
+			// 配置重载
+			r.Post("/config/reload", ReloadConfig)
+			r.Get("/config", GetConfig)
+
+			// 主题模板管理
+			r.Get("/topic-prompts", ListTopicPrompts)
+			r.Post("/topic-prompts", CreateTopicPrompt)
+			r.Get("/topic-prompts/{id}", GetTopicPrompt)
+			r.Put("/topic-prompts/{id}", UpdateTopicPrompt)
+			r.Delete("/topic-prompts/{id}", DeleteTopicPrompt)
+
+			// 事件追踪管理
+			r.Post("/events", CreateEventTrack)
+			r.Get("/events/pending", ListPendingEvents)
+			r.Put("/events/{id}", UpdateEventTrack)
+			r.Delete("/events/{id}", DeleteEventTrack)
+			r.Post("/events/{id}/activate", ActivateEventTrack)
+			r.Post("/events/{id}/pause", PauseEventTrack)
+			r.Post("/events/{id}/complete", CompleteEventTrack)
+			r.Post("/events/{id}/match", MatchSingleEventArticles)
+			r.Post("/events/{id}/optimize", OptimizeEventDescription)
+			r.Post("/events/{id}/check-quality", CheckEventMatchQuality)
+
+			// 热点检测和生命周期管理
+			r.Post("/events/detect-hot-topics", DetectHotTopics)
+			r.Post("/events/auto-pause-inactive", AutoPauseInactiveEvents)
+			r.Post("/events/match-articles", MatchArticlesToEvents)
+		})
 	})
 
 	// 静态文件服务
@@ -802,6 +837,8 @@ func RefreshFeed(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("Failed to fetch feed %s: %v\n", feed.URL, err)
 			return
 		}
+
+		autoFillFeedTitle(feed, parsedFeed.Title)
 
 		fmt.Printf("Fetched feed %s: %d items\n", feed.Title, len(parsedFeed.Items))
 
@@ -2539,7 +2576,9 @@ func fetchArticleOriginalContent(ctx context.Context, link string) (content, tit
 		return "", "", fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	art, err := readability.FromReader(bytes.NewReader(body), req.URL)
+	// GB2312/GBK 等非 UTF-8 站点直接解析会乱码：readability 前先转码。
+	// Reader 版流式转换，UTF-8 页面（绝大多数）零拷贝直达 readability
+	art, err := readability.FromReader(crawler.DecodeToUTF8Reader(body, "", resp.Header.Get("Content-Type")), req.URL)
 	if err != nil {
 		return "", "", fmt.Errorf("获取原文失败: %w", err)
 	}
@@ -3218,6 +3257,8 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 
 		// 登录密码（留空则不启用登录校验；修改后旧会话立即失效）
 		appConfig.Server.Password = r.FormValue("server_password")
+		// 阅读密码（留空则不启用访客只读模式；与管理员密码共用会话失效机制）
+		appConfig.Server.ReaderPassword = r.FormValue("reader_password")
 
 		// 提示词覆盖（与内置默认相同则存空 = 使用内置，便于后续升级默认提示词）
 		analyzePrompt := strings.TrimSpace(r.FormValue("prompt_analyze_system"))
@@ -3426,7 +3467,7 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result := notify.NewGotifySender(&notify.GotifyConfig{URL: req.GotifyURL, AppToken: req.GotifyToken}).
-			Send(&notify.Message{Title: "RSS AI Reader 连接测试", Content: "✅ 收到这条消息说明 Gotify 推送配置正确"})
+			Send(&notify.Message{Title: "AI Reader 连接测试", Content: "✅ 收到这条消息说明 Gotify 推送配置正确"})
 		respondPushResult(result, "Gotify", respond)
 
 	case "email":
@@ -3452,7 +3493,7 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 			Password: req.SMTPPassword,
 			From:     emailFrom,
 			To:       emailTo,
-		}).Send(&notify.Message{Title: "RSS AI Reader 连接测试", Content: "✅ 收到这封邮件说明 SMTP 配置正确"})
+		}).Send(&notify.Message{Title: "AI Reader 连接测试", Content: "✅ 收到这封邮件说明 SMTP 配置正确"})
 		respondPushResult(result, "邮件（发送到 "+emailTo+"）", respond)
 
 	case "qqbot":
@@ -3464,7 +3505,7 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 			AppID:     req.QQBotAppID,
 			AppSecret: req.QQBotAppSecret,
 			UserID:    req.QQBotUserID,
-		}).Send(&notify.Message{Title: "RSS AI Reader 连接测试", Content: "✅ 收到这条消息说明 QQ Bot 配置正确"})
+		}).Send(&notify.Message{Title: "AI Reader 连接测试", Content: "✅ 收到这条消息说明 QQ Bot 配置正确"})
 		respondPushResult(result, "QQ Bot", respond)
 
 	case "webhook":
@@ -3473,7 +3514,7 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result := notify.NewWebhookSender(&notify.WebhookConfig{URL: req.WebhookURL}).
-			Send(&notify.Message{Title: "RSS AI Reader 连接测试", Content: "✅ 收到这条请求说明 Webhook 配置正确"})
+			Send(&notify.Message{Title: "AI Reader 连接测试", Content: "✅ 收到这条请求说明 Webhook 配置正确"})
 		respondPushResult(result, "Webhook", respond)
 
 	case "dingtalk":
@@ -3484,7 +3525,7 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 		result := notify.NewDingTalkSender(&notify.DingTalkConfig{
 			WebhookURL: req.DingTalkWebhookURL,
 			Secret:     req.DingTalkSecret,
-		}).Send(&notify.Message{Title: "RSS AI Reader 连接测试", Content: "✅ 收到这条消息说明钉钉推送配置正确"})
+		}).Send(&notify.Message{Title: "AI Reader 连接测试", Content: "✅ 收到这条消息说明钉钉推送配置正确"})
 		respondPushResult(result, "钉钉", respond)
 
 	case "proxy":
@@ -3619,6 +3660,7 @@ func saveConfigToFile() error {
 	}
 	inServerSection := false
 	inPromptsSection := false
+	inDataBackupSection := false
 
 	// 预检 llm 段内是否已有 fallback 子段（没有则在 model 行后插入完整块）
 	llmHasFallbackSection := false
@@ -3862,6 +3904,24 @@ func saveConfigToFile() error {
 			line = updateYAMLValue(line, appConfig.Scheduler.DailyReportTime)
 		}
 
+		// 更新数据备份配置（统一走段守卫，避免全局键名匹配误伤其他段的同名字段）
+		if inDataBackupSection {
+			if strings.HasPrefix(trimmedLine, "auto_enable:") {
+				line = updateYAMLValue(line, fmt.Sprintf("%t", appConfig.DataBackup.AutoEnable))
+			}
+			if strings.HasPrefix(trimmedLine, "max_files:") {
+				line = updateYAMLValue(line, fmt.Sprintf("%d", maxBackupFiles()))
+			}
+			if strings.HasPrefix(trimmedLine, "interval:") {
+				line = updateYAMLValue(line, backupInterval().String())
+			}
+		}
+		if strings.HasPrefix(trimmedLine, "data_backup:") {
+			inDataBackupSection = true
+		} else if inDataBackupSection && trimmedLine != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmedLine, "#") {
+			inDataBackupSection = false
+		}
+
 		result.WriteString(line + "\n")
 	}
 
@@ -3875,6 +3935,12 @@ func saveConfigToFile() error {
 	if !strings.Contains(string(originalContent), "prompts:") {
 		result.WriteString(fmt.Sprintf("\n# 提示词覆盖（留空使用内置默认，可在设置页编辑）\nprompts:\n  analyze_system: %q\n  translate_system: %q\n",
 			appConfig.Prompts.AnalyzeSystem, appConfig.Prompts.TranslateSystem))
+	}
+
+	// data_backup 段：文件中没有时追加到尾部（已有则在上面循环中行内更新）
+	if !strings.Contains(string(originalContent), "data_backup:") {
+		result.WriteString(fmt.Sprintf("\n# 数据库自动备份（VACUUM INTO 快照存至库文件同目录 backups/）\ndata_backup:\n  auto_enable: %t\n  interval: %s\n  max_files: %d\n",
+			appConfig.DataBackup.AutoEnable, backupInterval().String(), maxBackupFiles()))
 	}
 
 	return os.WriteFile(configFilePath, []byte(result.String()), 0644)
@@ -3999,7 +4065,7 @@ func IndexPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "index", data)
+	renderTemplate(w, r, "index", data)
 }
 
 // TopicsPage 话题流页面（Readhub 式：跨多源聚合的话题卡片 + 热榜侧栏）
@@ -4045,7 +4111,7 @@ func TopicsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "topics", data)
+	renderTemplate(w, r, "topics", data)
 }
 
 // topicFeedbackMult 话题深度阅读的正反馈权重（读汇总粒度粗于读完单篇，取其一半）
@@ -4126,7 +4192,7 @@ func TopicDetailPage(w http.ResponseWriter, r *http.Request) {
 		renderTemplateBlock(w, "topic_detail", "topic-detail-content", data)
 		return
 	}
-	renderTemplate(w, "topic_detail", data)
+	renderTemplate(w, r, "topic_detail", data)
 }
 
 // RebuildTopics 从存量已分析文章重建话题（清空现有话题后按时间序重新聚合，异步执行）
@@ -4286,7 +4352,7 @@ func FeedsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "feeds", data)
+	renderTemplate(w, r, "feeds", data)
 }
 
 // ArticlesPage 文章列表页
@@ -4350,7 +4416,7 @@ func ArticlesPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "articles", data)
+	renderTemplate(w, r, "articles", data)
 }
 
 // SettingsPage 设置页
@@ -4402,6 +4468,7 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings.ProtectFetchOriginal = appConfig.Feeds.ProtectFetchOriginal
 		// 登录密码
 		settings.ServerPassword = appConfig.Server.Password
+		settings.ReaderPassword = appConfig.Server.ReaderPassword
 		// 提示词（显示当前生效值：自定义优先，否则内置默认）
 		settings.PromptAnalyzeSystem = ai.DefaultAnalyzeSystemPrompt
 		settings.PromptTranslateSystem = ai.DefaultTranslateSystemPrompt
@@ -4419,7 +4486,7 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		Active:    "settings",
 		Settings:  settings,
 	}
-	renderTemplate(w, "settings", data)
+	renderTemplate(w, r, "settings", data)
 }
 
 // CategoriesPage 分类管理页
@@ -4451,7 +4518,7 @@ func CategoriesPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "categories", data)
+	renderTemplate(w, r, "categories", data)
 }
 
 // TagsPage 标签管理页
@@ -4482,7 +4549,7 @@ func TagsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "tags", data)
+	renderTemplate(w, r, "tags", data)
 }
 
 // RulesPage 关注规则页
@@ -4513,7 +4580,7 @@ func RulesPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "rules", data)
+	renderTemplate(w, r, "rules", data)
 }
 
 // FollowedPage 关注的文章页
@@ -4545,7 +4612,7 @@ func FollowedPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if appDB == nil {
-		renderTemplate(w, "followed", data)
+		renderTemplate(w, r, "followed", data)
 		return
 	}
 
@@ -4589,7 +4656,7 @@ func FollowedPage(w http.ResponseWriter, r *http.Request) {
 	// 获取所有文章并匹配
 	articles, err := appDB.ListArticles(1000, 0) // 获取最近的文章
 	if err != nil {
-		renderTemplate(w, "followed", data)
+		renderTemplate(w, r, "followed", data)
 		return
 	}
 
@@ -4643,7 +4710,7 @@ func FollowedPage(w http.ResponseWriter, r *http.Request) {
 	data.PrevPage = page - 1
 	data.NextPage = page + 1
 
-	renderTemplate(w, "followed", data)
+	renderTemplate(w, r, "followed", data)
 }
 
 // matchKeywords 检查规则关键词是否与文章关键词/标题匹配
@@ -4861,7 +4928,7 @@ func ReportsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	renderTemplate(w, "reports", data)
+	renderTemplate(w, r, "reports", data)
 }
 
 // DataPage 数据管理页
@@ -4879,16 +4946,53 @@ func DataPage(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// 从数据库加载统计数据
+	// 从数据库加载统计数据（向量计数走 GetStats，与兄弟统计同层）
 	if appDB != nil {
 		stats, err := appDB.GetStats()
 		if err == nil {
 			data.Stats.TotalArticles = stats["total_articles"]
 			data.Stats.AdArticles = stats["ad_articles"]
+			data.Stats.EmbeddingCount = stats["embedding_count"]
+			data.Stats.SummaryEmbeddingCount = stats["summary_embedding_count"]
 		}
 	}
 
-	renderTemplate(w, "data", data)
+	// 数据库大小（主文件 + WAL/SHM 侧车文件，更接近真实占用）
+	if appConfig != nil {
+		data.Stats.DatabaseSize = formatDBFileSize(appConfig.Database.Path)
+	}
+
+	// 最近备份：取 backups 目录最新文件的时间
+	if backups := listDBBackups(); len(backups) > 0 {
+		data.Stats.LastBackup = backups[0].CreatedAtText
+	}
+
+	renderTemplate(w, r, "data", data)
+}
+
+// formatBytes 字节数转人类可读（1024 进制），页面统计与备份列表共用
+func formatBytes(total int64) string {
+	switch {
+	case total >= 1<<30:
+		return fmt.Sprintf("%.2f GB", float64(total)/(1<<30))
+	case total >= 1<<20:
+		return fmt.Sprintf("%.2f MB", float64(total)/(1<<20))
+	case total >= 1<<10:
+		return fmt.Sprintf("%.2f KB", float64(total)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", total)
+	}
+}
+
+// formatDBFileSize 数据库主文件与 WAL/SHM 侧车文件大小合计，人类可读
+func formatDBFileSize(path string) string {
+	total := int64(0)
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			total += info.Size()
+		}
+	}
+	return formatBytes(total)
 }
 
 // EventsPage 事件追踪页
@@ -4898,7 +5002,7 @@ func EventsPage(w http.ResponseWriter, r *http.Request) {
 		PageTitle: "事件追踪",
 		Active:    "events",
 	}
-	renderTemplate(w, "events", data)
+	renderTemplate(w, r, "events", data)
 }
 
 // PendingEventsPage 待关注事件页
@@ -6095,6 +6199,18 @@ func RefreshAllFeeds(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "refreshing"})
 }
 
+// autoFillFeedTitle 标题留空时用抓到的源标题自动补齐（添加源表单"自动获取"承诺的落地；
+// 用户手动填写的标题优先，抓到空标题的源保持原值不动）。两条刷新路径共用
+func autoFillFeedTitle(feed *models.Feed, fetchedTitle string) {
+	if strings.TrimSpace(feed.Title) != "" || strings.TrimSpace(fetchedTitle) == "" {
+		return
+	}
+	feed.Title = fetchedTitle
+	if err := appDB.UpdateFeedTitle(feed.ID, feed.Title); err != nil {
+		fmt.Printf("Auto fill feed title failed for %s: %v\n", feed.URL, err)
+	}
+}
+
 // RefreshFeedInternal 内部刷新单个订阅源（供调度器调用）
 func RefreshFeedInternal(feedID int64) error {
 	if appDB == nil {
@@ -6122,6 +6238,8 @@ func RefreshFeedInternal(feedID int64) error {
 			fmt.Printf("Failed to fetch feed %s: %v\n", feed.URL, err)
 			return
 		}
+
+		autoFillFeedTitle(feed, parsedFeed.Title)
 
 		fmt.Printf("Fetched feed %s: %d items\n", feed.Title, len(parsedFeed.Items))
 
