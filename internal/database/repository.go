@@ -538,9 +538,18 @@ func (d *DB) UpdateArticleEmbedding(id int64, embedding []byte) error {
 }
 
 // UpdateArticleContent 更新文章正文内容
+// UpdateArticleContent 更新文章内容
 func (d *DB) UpdateArticleContent(id int64, content string) error {
 	_, err := d.db.Exec(`UPDATE articles SET content = ? WHERE id = ?`, content, id)
 	return err
+}
+
+// ArticleContentFilter 取文章所属订阅源的内容过滤规则（原文抓取落库前应用，无规则返回空串）
+func (d *DB) ArticleContentFilter(articleID int64) string {
+	var rules string
+	_ = d.db.QueryRow(`SELECT COALESCE(f.content_filter, '') FROM articles a
+		JOIN feeds f ON f.id = a.feed_id WHERE a.id = ?`, articleID).Scan(&rules)
+	return rules
 }
 
 // UpdateArticleSummaryEmbedding 更新文章的总结向量

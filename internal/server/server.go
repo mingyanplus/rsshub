@@ -2493,7 +2493,8 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 使用 readability 获取原文（经 crawler.HTTPClient，跟随代理配置）
+	// 使用 readability 获取原文（经 crawler.HTTPClient，跟随代理配置）；
+	// 先应用订阅源内容过滤再做长度保护与落库（比较/保存的都是过滤后的实际内容）
 	content, title, err := fetchArticleOriginalContent(r.Context(), article.Link)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -2503,6 +2504,7 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	content = crawler.ApplyContentFilter(content, appDB.ArticleContentFilter(id))
 
 	// 获取原文保护：抓取结果比现有正文短很多时视为疑似失败（错误页/验证页/部分渲染），不覆盖
 	// 默认开启；可在设置页关闭（feeds.protect_fetch_original）
@@ -2603,6 +2605,8 @@ func tryFetchArticleContent(id int64, link string) string {
 		fmt.Printf("Article %d auto fetch original skipped: %v\n", id, err)
 		return ""
 	}
+	// 应用订阅源内容过滤（HTML 源等无正文入库环节，过滤在此补齐），全文被滤空视为无内容
+	content = crawler.ApplyContentFilter(content, appDB.ArticleContentFilter(id))
 	if strings.TrimSpace(stripHTMLSimple(content)) == "" {
 		fmt.Printf("Article %d auto fetch original skipped: empty content\n", id)
 		return ""

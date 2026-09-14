@@ -353,3 +353,37 @@ func TestBehaviorLogging(t *testing.T) {
 		t.Errorf("IsFavorite/NotInterested = (%v, %v), want (true, true)", article.IsFavorite, article.NotInterested)
 	}
 }
+
+// ArticleContentFilter 取文章所属订阅源的过滤规则（原文抓取落库前应用）
+func TestArticleContentFilter(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "test-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	db, err := New(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer db.Close()
+
+	feedID, err := db.CreateFeed(&models.Feed{
+		Title: "过滤测试源", URL: "https://filter.example.com",
+		IsActive: true, ContentFilter: "加入我们的讨论群\n# 注释行\n推广.*",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artID, err := db.CreateArticle(&models.Article{
+		FeedID: feedID, Title: "测试文章", Link: "https://filter.example.com/a1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := db.ArticleContentFilter(artID); got != "加入我们的讨论群\n# 注释行\n推广.*" {
+		t.Errorf("ArticleContentFilter = %q, want 订阅源的过滤规则", got)
+	}
+	if got := db.ArticleContentFilter(999999); got != "" {
+		t.Errorf("不存在文章应返回空串, got %q", got)
+	}
+}
