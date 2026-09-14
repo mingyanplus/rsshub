@@ -6205,7 +6205,7 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 	fmt.Printf("Processed %d incomplete articles\n", len(articles))
 }
 
-// TestSource 测试源配置（返回前 5 条预览）
+// TestSource 测试源配置（返回前 5 + 后 3 条预览，首尾都能核对抓取是否正常）
 func TestSource(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SourceType   string `json:"source_type"`
@@ -6232,15 +6232,29 @@ func TestSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	preview := feed.Items
-	if len(preview) > 5 {
-		preview = preview[:5]
+	// 预览投影：前端只消费 title/link/content（content 截 100 字符），
+	// 全量序列化 FeedItem 会把全文 RSS 的整页 Content（单条可达 MB 级）放大进响应
+	projectItems := func(items []*crawler.FeedItem) []map[string]string {
+		out := make([]map[string]string, len(items))
+		for i, it := range items {
+			content := it.Content
+			if r := []rune(content); len(r) > 100 {
+				content = string(r[:100])
+			}
+			out[i] = map[string]string{"title": it.Title, "link": it.Link, "content": content}
+		}
+		return out
+	}
+	preview, tail := feed.Items, []*crawler.FeedItem(nil)
+	if len(feed.Items) > 8 {
+		preview, tail = feed.Items[:5], feed.Items[len(feed.Items)-3:]
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"title":      feed.Title,
 		"item_count": len(feed.Items),
-		"preview":    preview,
+		"preview":    projectItems(preview),
+		"tail":       projectItems(tail),
 	})
 }
 

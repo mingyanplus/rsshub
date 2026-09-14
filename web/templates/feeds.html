@@ -452,13 +452,20 @@ function testSource() {
 
         let html = '<div class="p-2 bg-green-50 text-green-700 text-sm rounded mb-2">✅ 提取成功，共 ' + (data.item_count || 0) + ' 条结果</div>';
         if (data.preview && data.preview.length > 0) {
-            data.preview.forEach((item, i) => {
-                html += '<div class="p-2 bg-gray-50 rounded text-sm">' +
-                    '<div class="font-medium">' + (i+1) + '. ' + (item.title || '无标题') + '</div>' +
+            const renderItem = (item, idx) =>
+                '<div class="p-2 bg-gray-50 rounded text-sm">' +
+                    '<div class="font-medium">' + idx + '. ' + (item.title || '无标题') + '</div>' +
                     (item.link ? '<div class="text-xs text-gray-500 truncate">' + item.link + '</div>' : '') +
                     (item.content ? '<div class="text-xs text-gray-600 mt-1 line-clamp-2">' + item.content.substring(0, 100) + '</div>' : '') +
-                    '</div>';
-            });
+                '</div>';
+            data.preview.forEach((item, i) => { html += renderItem(item, i + 1); });
+            if (data.tail && data.tail.length > 0) {
+                const total = data.item_count || 0;
+                const hidden = total - data.preview.length - data.tail.length;
+                html += '<div class="p-1 text-center text-xs text-gray-400">⋯ 中间 ' + hidden + ' 条未展示 ⋯</div>';
+                const startIdx = total - data.tail.length + 1;
+                data.tail.forEach((item, i) => { html += renderItem(item, startIdx + i); });
+            }
         }
         resultDiv.innerHTML = html;
     })

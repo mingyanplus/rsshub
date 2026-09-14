@@ -68,28 +68,20 @@ func (s *HtmlSource) FetchAndParse(ctx context.Context) (*Feed, error) {
 	doc.Find(s.config.ItemSelector).Each(func(i int, sel *goquery.Selection) {
 		item := &FeedItem{}
 
-		if s.config.TitleSelector != "" {
-			item.Title = strings.TrimSpace(sel.Find(s.config.TitleSelector).First().Text())
+		item.Title = strings.TrimSpace(pickTarget(sel, s.config.TitleSelector).Text())
+
+		if link, exists := pickTarget(sel, s.config.LinkSelector).Attr(s.config.LinkAttr); exists {
+			item.Link = resolveURL(s.config.BaseURL, link)
 		}
 
-		if s.config.LinkSelector != "" {
-			linkSel := sel.Find(s.config.LinkSelector).First()
-			link, exists := linkSel.Attr(s.config.LinkAttr)
-			if exists {
-				item.Link = resolveURL(s.config.BaseURL, link)
-			}
+		dateSel := pickTarget(sel, s.config.DateSelector)
+		dateStr := dateSel.AttrOr("datetime", "")
+		if dateStr == "" {
+			dateStr = strings.TrimSpace(dateSel.Text())
 		}
-
-		if s.config.DateSelector != "" {
-			dateSel := sel.Find(s.config.DateSelector).First()
-			dateStr := dateSel.AttrOr("datetime", "")
-			if dateStr == "" {
-				dateStr = strings.TrimSpace(dateSel.Text())
-			}
-			if t, err := parseDate(dateStr); err == nil {
-				item.PublishedParsed = &t
-				item.Published = t.Format(time.RFC3339)
-			}
+		if t, err := parseDate(dateStr); err == nil {
+			item.PublishedParsed = &t
+			item.Published = t.Format(time.RFC3339)
 		}
 
 		if s.config.ContentSelector != "" {
@@ -106,6 +98,15 @@ func (s *HtmlSource) FetchAndParse(ctx context.Context) (*Feed, error) {
 
 	log.Printf("HTML source: extracted %d items from %s", len(feed.Items), s.config.URL)
 	return feed, nil
+}
+
+// pickTarget 选择器非空时取条目内首个匹配子元素；留空回退条目自身
+// （goquery Find 只匹配后代，条目本身就是 <a>/<time> 的列表页无法用子选择器选中自身）
+func pickTarget(sel *goquery.Selection, selector string) *goquery.Selection {
+	if selector == "" {
+		return sel
+	}
+	return sel.Find(selector).First()
 }
 
 // resolveURL 将相对链接补全为绝对链接
