@@ -88,6 +88,12 @@ push:
     url: ""
     headers: {}
 
+  # 钉钉机器人推送
+  dingtalk:
+    enabled: false
+    webhook_url: ""    # 完整 webhook 地址，如 https://oapi.dingtalk.com/robot/send?access_token=xxx
+    secret: ""         # 加签密钥（安全设置为"加签"时必填，其他模式留空）
+
 # 事件匹配器配置
 event_matcher:
   match_threshold: 0.65          # 综合匹配阈值 (0-1)，越大越严格

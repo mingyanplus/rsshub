@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"regexp"
@@ -252,6 +253,8 @@ type SettingsData struct {
 	QQBotAppID            string
 	QQBotAppSecret        string
 	QQBotUserID           string
+	DingTalkWebhookURL    string
+	DingTalkSecret        string
 	MorningReportTime     string
 	EveningReportTime     string
 	DailyReportTime       string
@@ -809,6 +812,7 @@ func RefreshFeed(w http.ResponseWriter, r *http.Request) {
 			title       string
 			content     string
 			description string
+			link        string
 		}
 
 		for _, item := range parsedFeed.Items {
@@ -868,7 +872,8 @@ func RefreshFeed(w http.ResponseWriter, r *http.Request) {
 				title       string
 				content     string
 				description string
-			}{articleID, item.Title, content, item.Description})
+				link        string
+			}{articleID, item.Title, content, item.Description, item.Link})
 		}
 
 		fmt.Printf("Feed %s refreshed, %d new articles\n", feed.Title, newCount)
@@ -889,7 +894,7 @@ func RefreshFeed(w http.ResponseWriter, r *http.Request) {
 				if i > 0 {
 					time.Sleep(articleInterval)
 				}
-				analyzeArticleAsync(art.id, art.title, art.content, art.description)
+				analyzeArticleAsync(art.id, art.title, art.content, art.description, art.link)
 			}
 		}
 	}()
@@ -989,7 +994,7 @@ func analyzeCtxTimeout() time.Duration {
 	return 90 * time.Second // 无配置时与默认 LLM 超时 60s + 30s 余量一致
 }
 
-func analyzeArticleAsync(articleID int64, title, content, description string) {
+func analyzeArticleAsync(articleID int64, title, content, description, link string) {
 	ctx, cancel := context.WithTimeout(context.Background(), analyzeCtxTimeout())
 	defer cancel()
 
@@ -998,8 +1003,12 @@ func analyzeArticleAsync(articleID int64, title, content, description string) {
 	if text == "" {
 		text = description
 	}
+	// 正文与摘要都为空（如列表型 feed）：自动抓取一次原文再分析；失败则标记跳过
 	if text == "" {
-		return
+		if text = tryFetchArticleContent(articleID, link); text == "" {
+			markArticleNoContent(articleID, noContentMarkReason)
+			return
+		}
 	}
 
 	// 限制内容长度
@@ -1416,7 +1425,7 @@ func RetryArticleProcess(w http.ResponseWriter, r *http.Request) {
 	if len(text) > 4000 {
 		text = text[:4000]
 	}
-	go analyzeArticleAsync(id, article.Title, text, "")
+	go analyzeArticleAsync(id, article.Title, text, "", article.Link)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1503,10 +1512,8 @@ func ProcessPendingArticles(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// 使用内容或摘要
-			text := article.Content
-			if text == "" {
-				text = article.Summary
-			}
+			// 正文 → 摘要 → 自动抓取原文兜底（失败标记/计数出队，见 resolveAnalysisText）
+			text := resolveAnalysisText(article)
 			if text == "" {
 				continue
 			}
@@ -1737,25 +1744,11 @@ func ReanalyzeArticlesForSummary(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(articleInterval)
 			}
 
-			// 使用内容或摘要
-			text := article.Content
-			if text == "" {
-				text = article.Summary
-			}
-			if text == "" {
-				continue
-			}
-
-			// 限制内容长度
-			if len(text) > 4000 {
-				text = text[:4000]
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-
-			// 检查文章缺少哪些字段
+			// 先做零成本的字段检查：embedding-only 路径不需要正文，避免为其白付一次原文抓取
 			needsReanalyze := article.OneLineSummary == "" || article.Entities == ""
 			needsEmbedding := len(article.SummaryEmbedding) == 0 && article.OneLineSummary != ""
+
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 
 			// 如果只需要生成向量
 			if needsEmbedding && !needsReanalyze && article.OneLineSummary != "" {
@@ -1767,6 +1760,18 @@ func ReanalyzeArticlesForSummary(w http.ResponseWriter, r *http.Request) {
 				cancel()
 				successCount++
 				continue
+			}
+
+			// 需要重新 AI 分析：正文 → 摘要 → 自动抓取原文兜底（失败标记/计数出队）
+			text := resolveAnalysisText(article)
+			if text == "" {
+				cancel()
+				continue
+			}
+
+			// 限制内容长度
+			if len(text) > 4000 {
+				text = text[:4000]
 			}
 
 			// 需要重新 AI 分析
@@ -2451,36 +2456,12 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 使用 readability 获取原文（经 crawler.HTTPClient，跟随代理配置）
-	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	if appConfig != nil && appConfig.Feeds.FetchUserAgent != "" {
-		userAgent = appConfig.Feeds.FetchUserAgent
-	}
-	fetchReq, err := http.NewRequest("GET", article.Link, nil)
+	content, title, err := fetchArticleOriginalContent(r.Context(), article.Link)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"error":   fmt.Sprintf("创建请求失败: %v", err),
-		})
-		return
-	}
-	fetchReq.Header.Set("User-Agent", userAgent)
-	fetchResp, err := crawler.HTTPClient.Do(fetchReq)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   fmt.Sprintf("获取原文失败: %v", err),
-		})
-		return
-	}
-	defer fetchResp.Body.Close()
-	art, err := readability.FromReader(fetchResp.Body, fetchReq.URL)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   fmt.Sprintf("获取原文失败: %v", err),
+			"error":   fmt.Sprintf("%v", err),
 		})
 		return
 	}
@@ -2492,7 +2473,7 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 		if current == "" {
 			current = article.Content
 		}
-		if oldLen, newLen := len(stripHTMLSimple(current)), len(stripHTMLSimple(art.Content)); oldLen > 0 && newLen < oldLen/2 {
+		if oldLen, newLen := len(stripHTMLSimple(current)), len(stripHTMLSimple(content)); oldLen > 0 && newLen < oldLen/2 {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
@@ -2503,7 +2484,7 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 保存到 content 字段
-	if err := appDB.UpdateArticleContent(id, art.Content); err != nil {
+	if err := appDB.UpdateArticleContent(id, content); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
@@ -2515,9 +2496,138 @@ func FetchOriginalContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"content": art.Content,
-		"title":   art.Title,
+		"content": content,
+		"title":   title,
 	})
+}
+
+// maxFetchBodyBytes 原文抓取的响应体上限（防超大页面/文件撑爆内存）
+const maxFetchBodyBytes = 10 << 20 // 10MB
+
+// fetchArticleOriginalContent 抓取链接并用 readability 提取正文（经 crawler.HTTPClient，跟随代理配置）。
+// 先读头部嗅探内容类型，非 HTML 文本（PDF/图片等二进制）会被 readability 当 HTML "解析" 成乱码，
+// 这里提前拒绝且不下载剩余部分；正文读取以 maxFetchBodyBytes 封顶
+func fetchArticleOriginalContent(ctx context.Context, link string) (content, title string, err error) {
+	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	if appConfig != nil && appConfig.Feeds.FetchUserAgent != "" {
+		userAgent = appConfig.Feeds.FetchUserAgent
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", link, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := crawler.HTTPClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("获取原文失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", "", fmt.Errorf("获取原文失败: 服务器返回 %d", resp.StatusCode)
+	}
+
+	// 嗅探而非信任 Content-Type 头：对谎报类型的服务器（如 PDF 标成 octet-stream）最准，
+	// 非 PDF/图片等非文本内容在下载剩余部分之前即被拒绝
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(resp.Body, head)
+	head = head[:n]
+	if sniffed := contentBaseType(http.DetectContentType(head)); !isTextualContentType(sniffed) {
+		return "", "", fmt.Errorf("链接指向非网页内容（%s），无法提取正文，请用「查看原文」在浏览器中打开", sniffed)
+	}
+	body, err := io.ReadAll(io.MultiReader(bytes.NewReader(head), io.LimitReader(resp.Body, maxFetchBodyBytes)))
+	if err != nil {
+		return "", "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	art, err := readability.FromReader(bytes.NewReader(body), req.URL)
+	if err != nil {
+		return "", "", fmt.Errorf("获取原文失败: %w", err)
+	}
+	return art.Content, art.Title, nil
+}
+
+// noContentMarkReason 无正文无摘要且自动抓取原文失败时的出队标记文案
+const noContentMarkReason = "文章无正文与摘要，自动抓取原文失败，已跳过分析"
+
+// tryFetchArticleContent 分析前的自动兜底：为无正文无摘要的文章（如列表型 feed）抓取一次原文。
+// 成功则存回 content 字段（下次不再重复抓取）并返回正文；失败或提取为空返回 ""（调用方跳过分析）
+func tryFetchArticleContent(id int64, link string) string {
+	if link == "" || appDB == nil {
+		return ""
+	}
+	// 后台自动抓取用独立短超时，避免死链在串行批处理循环里长时间阻塞（手动抓取走请求 ctx）
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	content, _, err := fetchArticleOriginalContent(ctx, link)
+	if err != nil {
+		fmt.Printf("Article %d auto fetch original skipped: %v\n", id, err)
+		return ""
+	}
+	if strings.TrimSpace(stripHTMLSimple(content)) == "" {
+		fmt.Printf("Article %d auto fetch original skipped: empty content\n", id)
+		return ""
+	}
+	if err := appDB.UpdateArticleContent(id, content); err != nil {
+		fmt.Printf("Article %d save fetched content failed: %v\n", id, err)
+	}
+	fmt.Printf("Article %d auto fetched original content (%d bytes)\n", id, len(content))
+	return content
+}
+
+// resolveAnalysisText 返回文章可进入 AI 分析的文本：正文 → 摘要 → 自动抓取一次原文。
+// 抓取失败或提取为空时返回 ""：无总结的文章标记出队；已有总结的文章计一次处理失败
+// （复用 IncrementProcessAttempts 的 3 次死信机制，避免每轮调度重复抓取同一死链）
+func resolveAnalysisText(article *models.Article) string {
+	text := article.Content
+	if text == "" {
+		text = article.Summary
+	}
+	if text != "" {
+		return text
+	}
+	if text = tryFetchArticleContent(article.ID, article.Link); text != "" {
+		return text
+	}
+	if article.OneLineSummary == "" {
+		markArticleNoContent(article.ID, noContentMarkReason)
+	} else {
+		appDB.IncrementProcessAttempts(article.ID, "自动抓取原文失败")
+	}
+	return ""
+}
+
+// markArticleNoContent 将无可用正文的文章标记为已处理，避免 keywords/one_line_summary 恒空
+// 导致其在未处理与不完整队列中永久空转（每轮调度都重新尝试抓取失败的站点）
+func markArticleNoContent(id int64, reason string) {
+	appDB.UpdateArticleAI(&models.AIUpdateParams{
+		ID:              id,
+		AISummary:       reason,
+		OneLineSummary:  "无内容文章",
+		Keywords:        "已标记",
+		Entities:        "无",
+		TopicCategory:   "无内容",
+		ImportanceScore: 1,
+	})
+}
+
+// contentBaseType 提取 Content-Type 的基础类型（去掉 "; charset=..." 参数并转小写）
+func contentBaseType(ct string) string {
+	if mt, _, err := mime.ParseMediaType(ct); err == nil {
+		return mt
+	}
+	return strings.ToLower(strings.TrimSpace(ct)) // 解析失败（如空串）退回原样截断前的值
+}
+
+// isTextualContentType 判断 Content-Type 是否为可提取正文的文本类型（HTML/纯文本/XML 等）
+func isTextualContentType(ct string) bool {
+	if ct == "" || strings.HasPrefix(ct, "text/") {
+		return true // 未声明类型按文本处理（个别服务器不返回 Content-Type）
+	}
+	switch ct {
+	case "application/xhtml+xml", "application/xml", "application/rss+xml", "application/atom+xml":
+		return true
+	}
+	return false
 }
 
 // ListCategories 列出分类
@@ -3088,6 +3198,9 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 		appConfig.Push.QQBot.AppID = r.FormValue("qqbot_app_id")
 		appConfig.Push.QQBot.AppSecret = r.FormValue("qqbot_app_secret")
 		appConfig.Push.QQBot.UserID = r.FormValue("qqbot_user_id")
+		// 钉钉机器人配置
+		appConfig.Push.DingTalk.WebhookURL = r.FormValue("dingtalk_webhook")
+		appConfig.Push.DingTalk.Secret = r.FormValue("dingtalk_secret")
 
 		// 代理配置
 		appConfig.Proxy.URL = strings.TrimSpace(r.FormValue("proxy_url"))
@@ -3244,6 +3357,9 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 		QQBotUserID    string `json:"qqbot_user_id"`
 		// Webhook
 		WebhookURL string `json:"webhook_url"`
+		// DingTalk
+		DingTalkWebhookURL string `json:"dingtalk_webhook"`
+		DingTalkSecret     string `json:"dingtalk_secret"`
 		// Proxy
 		ProxyURL string `json:"proxy_url"`
 	}
@@ -3359,6 +3475,17 @@ func TestSettingsConnection(w http.ResponseWriter, r *http.Request) {
 		result := notify.NewWebhookSender(&notify.WebhookConfig{URL: req.WebhookURL}).
 			Send(&notify.Message{Title: "RSS AI Reader 连接测试", Content: "✅ 收到这条请求说明 Webhook 配置正确"})
 		respondPushResult(result, "Webhook", respond)
+
+	case "dingtalk":
+		if req.DingTalkWebhookURL == "" {
+			respond(false, "请先填写钉钉机器人 Webhook 地址")
+			return
+		}
+		result := notify.NewDingTalkSender(&notify.DingTalkConfig{
+			WebhookURL: req.DingTalkWebhookURL,
+			Secret:     req.DingTalkSecret,
+		}).Send(&notify.Message{Title: "RSS AI Reader 连接测试", Content: "✅ 收到这条消息说明钉钉推送配置正确"})
+		respondPushResult(result, "钉钉", respond)
 
 	case "proxy":
 		if req.ProxyURL == "" {
@@ -3523,6 +3650,7 @@ func saveConfigToFile() error {
 	inGotifySection := false
 	inWebhookSection := false
 	inQQBotSection := false
+	inDingTalkSection := false
 	proxySectionSeen := false
 
 	for _, line := range lines {
@@ -3568,31 +3696,45 @@ func saveConfigToFile() error {
 			inEmailSection = true
 			inGotifySection = false
 			inWebhookSection = false
+			inQQBotSection = false
+			inDingTalkSection = false
 		} else if strings.HasPrefix(trimmedLine, "gotify:") {
 			inGotifySection = true
 			inEmailSection = false
 			inWebhookSection = false
+			inQQBotSection = false
+			inDingTalkSection = false
 		} else if strings.HasPrefix(trimmedLine, "webhook:") {
 			inWebhookSection = true
 			inEmailSection = false
 			inGotifySection = false
 			inQQBotSection = false
+			inDingTalkSection = false
 		} else if strings.HasPrefix(trimmedLine, "qqbot:") {
 			inQQBotSection = true
 			inEmailSection = false
 			inGotifySection = false
 			inWebhookSection = false
+			inDingTalkSection = false
+		} else if strings.HasPrefix(trimmedLine, "dingtalk:") {
+			inDingTalkSection = true
+			inEmailSection = false
+			inGotifySection = false
+			inWebhookSection = false
+			inQQBotSection = false
 		} else if strings.HasPrefix(trimmedLine, "proxy:") {
 			proxySectionSeen = true
 			inQQBotSection = false
 			inEmailSection = false
 			inGotifySection = false
 			inWebhookSection = false
+			inDingTalkSection = false
 		} else if strings.HasPrefix(trimmedLine, "push:") {
 			inEmailSection = false
 			inGotifySection = false
 			inWebhookSection = false
 			inQQBotSection = false
+			inDingTalkSection = false
 		}
 
 		// 更新 server 段登录密码
@@ -3686,6 +3828,14 @@ func saveConfigToFile() error {
 				line = updateYAMLValue(line, appConfig.Push.QQBot.AppSecret)
 			} else if strings.Contains(line, "user_id:") {
 				line = updateYAMLValue(line, appConfig.Push.QQBot.UserID)
+			}
+		}
+
+		if inDingTalkSection {
+			if strings.Contains(line, "webhook_url:") {
+				line = updateYAMLValue(line, appConfig.Push.DingTalk.WebhookURL)
+			} else if strings.Contains(line, "secret:") {
+				line = updateYAMLValue(line, appConfig.Push.DingTalk.Secret)
 			}
 		}
 
@@ -4242,6 +4392,9 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings.QQBotAppID = appConfig.Push.QQBot.AppID
 		settings.QQBotAppSecret = appConfig.Push.QQBot.AppSecret
 		settings.QQBotUserID = appConfig.Push.QQBot.UserID
+		// 钉钉机器人配置
+		settings.DingTalkWebhookURL = appConfig.Push.DingTalk.WebhookURL
+		settings.DingTalkSecret = appConfig.Push.DingTalk.Secret
 		// 代理配置
 		settings.ProxyURL = appConfig.Proxy.URL
 		settings.ProxyEnableContent = appConfig.Proxy.EnableContent
@@ -5979,6 +6132,7 @@ func RefreshFeedInternal(feedID int64) error {
 			title       string
 			content     string
 			description string
+			link        string
 		}
 
 		for _, item := range parsedFeed.Items {
@@ -6036,7 +6190,8 @@ func RefreshFeedInternal(feedID int64) error {
 				title       string
 				content     string
 				description string
-			}{articleID, item.Title, content, item.Description})
+				link        string
+			}{articleID, item.Title, content, item.Description, item.Link})
 		}
 
 		fmt.Printf("Feed %s refreshed, %d new articles\n", feed.Title, newCount)
@@ -6055,7 +6210,7 @@ func RefreshFeedInternal(feedID int64) error {
 				if i > 0 {
 					time.Sleep(articleInterval)
 				}
-				analyzeArticleAsync(art.id, art.title, art.content, art.description)
+				analyzeArticleAsync(art.id, art.title, art.content, art.description, art.link)
 			}
 		}
 	}()
@@ -6094,27 +6249,13 @@ func ProcessPendingArticlesInternal(articles []*models.Article) {
 		if text == "" {
 			text = article.Summary
 		}
-		if text == "" {
-			// 无任何文本的文章直接标记为已处理：否则 keywords 恒空，
-			// 会永久霸占未处理队列头部（fetched_at ASC），挤占后续文章的处理名额
-			fmt.Printf("Article %d has no text content, marking as processed\n", article.ID)
-			appDB.UpdateArticleAI(&models.AIUpdateParams{
-				ID:             article.ID,
-				AISummary:      "文章无正文内容，无法分析",
-				OneLineSummary: "无内容文章",
-				Keywords:       "已标记",
-				Entities:       "无",
-				TopicCategory:  "无内容",
-				ImportanceScore: 1,
-			})
-			return
-		}
-
 		if len(text) > 4000 {
 			text = text[:4000]
 		}
 
-		analyzeArticleAsync(article.ID, article.Title, text, "")
+		// 空正文空摘要由 analyzeArticleAsync 内部自动抓取原文兜底（抓取失败即标记出队，
+		// 避免 keywords 恒空永久霸占未处理队列头部，挤占后续文章的处理名额）
+		analyzeArticleAsync(article.ID, article.Title, text, "", article.Link)
 	})
 
 	fmt.Printf("Processed %d pending articles\n", len(articles))
@@ -6127,22 +6268,8 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 	}
 
 	processArticlesConcurrent(articles, func(article *models.Article) {
-		text := article.Content
-		if text == "" {
-			text = article.Summary
-		}
-		if text == "" {
-			return
-		}
-
-		if len(text) > 4000 {
-			text = text[:4000]
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), analyzeCtxTimeout())
-		defer cancel()
-
-		// 检查文章缺少哪些字段（entities/summary_embedding 已由查询取到真实值）
+		// 先做零成本的字段检查：embedding-only 路径不需要正文，避免为其白付一次原文抓取
+		// （entities/summary_embedding 已由查询取到真实值）
 		needsReanalyze := article.OneLineSummary == "" || article.Entities == ""
 		needsEmbedding := len(article.SummaryEmbedding) == 0 && article.OneLineSummary != ""
 
@@ -6150,6 +6277,9 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 		if !needsReanalyze && !needsEmbedding {
 			return
 		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), analyzeCtxTimeout())
+		defer cancel()
 
 		// 如果只需要生成向量（已有 one_line_summary）
 		if needsEmbedding && !needsReanalyze && article.OneLineSummary != "" {
@@ -6159,6 +6289,16 @@ func ProcessIncompleteArticlesInternal(articles []*models.Article) {
 				fmt.Printf("Generated summary embedding for incomplete article %d\n", article.ID)
 			}
 			return
+		}
+
+		// 需要重新 AI 分析：正文 → 摘要 → 自动抓取原文兜底（失败标记/计数出队）
+		text := resolveAnalysisText(article)
+		if text == "" {
+			return
+		}
+
+		if len(text) > 4000 {
+			text = text[:4000]
 		}
 
 		// 需要重新 AI 分析

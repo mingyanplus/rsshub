@@ -60,6 +60,7 @@
                         {{if eq $ch "gotify"}}🔔 Gotify{{end}}
                         {{if eq $ch "qqbot"}}🤖 QQBot{{end}}
                         {{if eq $ch "webhook"}}🔗 Webhook{{end}}
+                        {{if eq $ch "dingtalk"}}💬 钉钉{{end}}
                     {{end}}
                 </span>
             </div>
@@ -153,6 +154,10 @@
                         <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
                             <input type="checkbox" name="channels" value="qqbot" class="w-4 h-4 text-blue-500 rounded">
                             <span class="text-sm">🤖 QQBot</span>
+                        </label>
+                        <label class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
+                            <input type="checkbox" name="channels" value="dingtalk" class="w-4 h-4 text-blue-500 rounded">
+                            <span class="text-sm">💬 钉钉</span>
                         </label>
                     </div>
                 </div>

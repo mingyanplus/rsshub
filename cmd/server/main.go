@@ -156,6 +156,16 @@ func main() {
 		logger.Info("Webhook notifier configured: %s", cfg.Push.Webhook.URL)
 	}
 
+	if cfg.Push.DingTalk.Enabled && cfg.Push.DingTalk.WebhookURL != "" {
+		dingtalkSender := notify.NewDingTalkSender(&notify.DingTalkConfig{
+			WebhookURL: cfg.Push.DingTalk.WebhookURL,
+			Secret:     cfg.Push.DingTalk.Secret,
+		})
+		notifyMgr.Register(notify.ChannelDingTalk, dingtalkSender)
+		channelsList = append(channelsList, "dingtalk")
+		logger.Info("DingTalk notifier configured")
+	}
+
 	channels := strings.Join(channelsList, ",")
 	reportGen := processor.NewReportGenerator(db, analyzer, notifyMgr, channels)
 	server.SetReportGenerator(reportGen)

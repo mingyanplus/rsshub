@@ -153,10 +153,11 @@ type CleanupConfig struct {
 
 // PushConfig 推送配置
 type PushConfig struct {
-	Email   EmailPushConfig   `mapstructure:"email"`
-	Gotify  GotifyPushConfig  `mapstructure:"gotify"`
-	QQBot   QQBotPushConfig   `mapstructure:"qqbot"`
-	Webhook WebhookPushConfig `mapstructure:"webhook"`
+	Email    EmailPushConfig    `mapstructure:"email"`
+	Gotify   GotifyPushConfig   `mapstructure:"gotify"`
+	QQBot    QQBotPushConfig    `mapstructure:"qqbot"`
+	Webhook  WebhookPushConfig  `mapstructure:"webhook"`
+	DingTalk DingTalkPushConfig `mapstructure:"dingtalk"`
 }
 
 // EmailPushConfig 邮件推送配置
@@ -192,6 +193,13 @@ type WebhookPushConfig struct {
 	Enabled bool              `mapstructure:"enabled"`
 	URL     string            `mapstructure:"url"`
 	Headers map[string]string `mapstructure:"headers"`
+}
+
+// DingTalkPushConfig 钉钉机器人推送配置
+type DingTalkPushConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	WebhookURL string `mapstructure:"webhook_url"` // 完整 webhook 地址（含 access_token 参数）
+	Secret     string `mapstructure:"secret"`      // 加签密钥（安全设置为"加签"时必填，其他模式留空）
 }
 
 // 默认配置值

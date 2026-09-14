@@ -72,6 +72,38 @@ func TestWebhookNotifierInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestDingTalkNotifierValidate(t *testing.T) {
+	config := &DingTalkConfig{
+		WebhookURL: "https://oapi.dingtalk.com/robot/send?access_token=test",
+		Secret:     "SECtest",
+	}
+
+	if !config.IsValid() {
+		t.Error("Valid config should pass validation")
+	}
+}
+
+func TestDingTalkNotifierValidateWithoutSecret(t *testing.T) {
+	config := &DingTalkConfig{
+		WebhookURL: "https://oapi.dingtalk.com/robot/send?access_token=test",
+	}
+
+	if !config.IsValid() {
+		t.Error("Config without secret (non-signed mode) should pass validation")
+	}
+}
+
+func TestDingTalkNotifierInvalidConfig(t *testing.T) {
+	config := &DingTalkConfig{
+		WebhookURL: "",
+		Secret:     "SECtest",
+	}
+
+	if config.IsValid() {
+		t.Error("Invalid config should fail validation")
+	}
+}
+
 func TestNotificationMessage(t *testing.T) {
 	msg := &Message{
 		Title:   "Test Notification",
@@ -118,6 +150,7 @@ func TestChannelType(t *testing.T) {
 		{ChannelGotify, "gotify"},
 		{ChannelWebhook, "webhook"},
 		{ChannelQQBot, "qqbot"},
+		{ChannelDingTalk, "dingtalk"},
 	}
 
 	for _, tt := range tests {

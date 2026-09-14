@@ -8,10 +8,11 @@ import (
 type Channel string
 
 const (
-	ChannelEmail   Channel = "email"
-	ChannelGotify  Channel = "gotify"
-	ChannelWebhook Channel = "webhook"
-	ChannelQQBot  Channel = "qqbot"
+	ChannelEmail    Channel = "email"
+	ChannelGotify   Channel = "gotify"
+	ChannelWebhook  Channel = "webhook"
+	ChannelQQBot    Channel = "qqbot"
+	ChannelDingTalk Channel = "dingtalk"
 )
 
 // Message 通知消息
@@ -74,6 +75,17 @@ type QQBotConfig struct {
 // IsValid 验证配置
 func (c *QQBotConfig) IsValid() bool {
 	return c.AppID != "" && c.AppSecret != "" && c.UserID != ""
+}
+
+// DingTalkConfig 钉钉机器人配置
+type DingTalkConfig struct {
+	WebhookURL string `json:"webhook_url"` // 完整 webhook 地址（含 access_token 参数）
+	Secret     string `json:"secret"`      // 加签密钥（安全设置为"加签"时必填，其他模式留空）
+}
+
+// IsValid 验证配置
+func (c *DingTalkConfig) IsValid() bool {
+	return c.WebhookURL != ""
 }
 
 // Notifier 通知器接口

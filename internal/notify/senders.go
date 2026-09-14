@@ -2,10 +2,14 @@ package notify
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -214,6 +218,91 @@ func (s *QQBotSender) Send(msg *Message) *Result {
 		var errMsg bytes.Buffer
 		errMsg.ReadFrom(resp.Body)
 		return &Result{Success: false, Error: fmt.Sprintf("qqbot returned status %d: %s", resp.StatusCode, errMsg.String())}
+	}
+
+	return &Result{Success: true}
+}
+
+// DingTalkSender 钉钉机器人推送器
+type DingTalkSender struct {
+	config *DingTalkConfig
+	client *http.Client
+}
+
+func NewDingTalkSender(config *DingTalkConfig) *DingTalkSender {
+	return &DingTalkSender{
+		config: config,
+		client: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (s *DingTalkSender) Channel() Channel {
+	return ChannelDingTalk
+}
+
+// signedURL 计算加签 URL：secret 非空时追加 timestamp 与 sign 参数（钉钉"加签"安全设置）
+func (s *DingTalkSender) signedURL() string {
+	if s.config.Secret == "" {
+		return s.config.WebhookURL
+	}
+	timestamp := time.Now().UnixMilli()
+	stringToSign := fmt.Sprintf("%d\n%s", timestamp, s.config.Secret)
+	mac := hmac.New(sha256.New, []byte(s.config.Secret))
+	mac.Write([]byte(stringToSign))
+	sign := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	sep := "&"
+	if !strings.Contains(s.config.WebhookURL, "?") {
+		sep = "?"
+	}
+	return fmt.Sprintf("%s%stimestamp=%d&sign=%s", s.config.WebhookURL, sep, timestamp, url.QueryEscape(sign))
+}
+
+func (s *DingTalkSender) Send(msg *Message) *Result {
+	if !s.config.IsValid() {
+		return &Result{Success: false, Error: "dingtalk config is invalid"}
+	}
+
+	targetURL := s.signedURL()
+
+	// 钉钉 markdown 消息：title 是通知栏摘要，正文完全由 text 决定，需自带标题
+	payload := map[string]interface{}{
+		"msgtype": "markdown",
+		"markdown": map[string]string{
+			"title": msg.Title,
+			"text":  "## " + msg.Title + "\n\n" + msg.Content,
+		},
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return &Result{Success: false, Error: err.Error()}
+	}
+
+	req, err := http.NewRequest("POST", targetURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return &Result{Success: false, Error: err.Error()}
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return &Result{Success: false, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return &Result{Success: false, Error: fmt.Sprintf("dingtalk returned status %d", resp.StatusCode)}
+	}
+
+	// 钉钉用 HTTP 200 + errcode 表达业务错误（如签名不匹配、关键词不命中），需解析判断
+	var result struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return &Result{Success: false, Error: fmt.Sprintf("failed to decode dingtalk response: %s", err.Error())}
+	}
+	if result.ErrCode != 0 {
+		return &Result{Success: false, Error: fmt.Sprintf("dingtalk errcode %d: %s", result.ErrCode, result.ErrMsg)}
 	}
 
 	return &Result{Success: true}
