@@ -1,6 +1,8 @@
 package notify
 
 import (
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -189,4 +191,47 @@ func TestParseChannelsEmpty(t *testing.T) {
 	if len(channels) != 0 {
 		t.Errorf("Empty string should return empty channels, got %d", len(channels))
 	}
+}
+
+// 钉钉加签 URL：URL 上误带的旧 timestamp/sign 参数必须剥掉再重签，
+// 否则双份参数让钉钉校验到旧时间戳，报 310000「机器人发送签名过期」
+func TestDingTalkSignedURLStripsStaleParams(t *testing.T) {
+	s := NewDingTalkSender(&DingTalkConfig{
+		WebhookURL: "https://oapi.dingtalk.com/robot/send?access_token=tok&timestamp=1600000000000&sign=OLD",
+		Secret:     "SEC123",
+	})
+	got := s.signedURL()
+
+	if strings.Contains(got, "OLD") || strings.Contains(got, "1600000000000") {
+		t.Errorf("stale sign params not stripped: %s", got)
+	}
+	if !strings.Contains(got, "access_token=tok") {
+		t.Errorf("access_token lost: %s", got)
+	}
+	if !strings.Contains(got, "timestamp=") || !strings.Contains(got, "sign=") {
+		t.Errorf("fresh sign params missing: %s", got)
+	}
+	// timestamp 应为毫秒量级（13 位），秒级时间戳会被钉钉判为过期
+	if ts := timestampParam(got); len(ts) != 13 {
+		t.Errorf("timestamp = %q (%d digits), want 13 (ms)", ts, len(ts))
+	}
+}
+
+// 无 secret：仍剥旧参数（旧签名永远无效），但不附加新签名
+func TestDingTalkSignedURLNoSecret(t *testing.T) {
+	s := NewDingTalkSender(&DingTalkConfig{
+		WebhookURL: "https://oapi.dingtalk.com/robot/send?access_token=tok&timestamp=1600000000000&sign=OLD",
+	})
+	got := s.signedURL()
+	if got != "https://oapi.dingtalk.com/robot/send?access_token=tok" {
+		t.Errorf("unexpected URL: %s", got)
+	}
+}
+
+func timestampParam(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("timestamp")
 }

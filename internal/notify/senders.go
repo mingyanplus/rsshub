@@ -240,21 +240,33 @@ func (s *DingTalkSender) Channel() Channel {
 	return ChannelDingTalk
 }
 
-// signedURL 计算加签 URL：secret 非空时追加 timestamp 与 sign 参数（钉钉"加签"安全设置）
+// signedURL 计算加签 URL：secret 非空时追加 timestamp 与 sign 参数（钉钉"加签"安全设置）。
+// 先剥掉 URL 上已有的 timestamp/sign——从钉钉文档示例复制的完整 URL 带旧签名参数，
+// 双份参数会让钉钉校验到旧时间戳，报 310000「机器人发送签名过期」
 func (s *DingTalkSender) signedURL() string {
-	if s.config.Secret == "" {
+	u, err := url.Parse(s.config.WebhookURL)
+	if err != nil {
 		return s.config.WebhookURL
+	}
+	q := u.Query()
+	q.Del("timestamp")
+	q.Del("sign")
+	u.RawQuery = q.Encode()
+	base := u.String()
+
+	if s.config.Secret == "" {
+		return base
 	}
 	timestamp := time.Now().UnixMilli()
 	stringToSign := fmt.Sprintf("%d\n%s", timestamp, s.config.Secret)
 	mac := hmac.New(sha256.New, []byte(s.config.Secret))
 	mac.Write([]byte(stringToSign))
 	sign := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	sep := "&"
-	if !strings.Contains(s.config.WebhookURL, "?") {
-		sep = "?"
+	sep := "?"
+	if u.RawQuery != "" {
+		sep = "&"
 	}
-	return fmt.Sprintf("%s%stimestamp=%d&sign=%s", s.config.WebhookURL, sep, timestamp, url.QueryEscape(sign))
+	return fmt.Sprintf("%s%stimestamp=%d&sign=%s", base, sep, timestamp, url.QueryEscape(sign))
 }
 
 func (s *DingTalkSender) Send(msg *Message) *Result {
