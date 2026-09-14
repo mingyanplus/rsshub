@@ -255,6 +255,7 @@ type SettingsData struct {
 	QQBotAppID            string
 	QQBotAppSecret        string
 	QQBotUserID           string
+	DingTalkEnabled       bool
 	DingTalkWebhookURL    string
 	DingTalkSecret        string
 	MorningReportTime     string
@@ -3238,6 +3239,7 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 		appConfig.Push.QQBot.AppSecret = r.FormValue("qqbot_app_secret")
 		appConfig.Push.QQBot.UserID = r.FormValue("qqbot_user_id")
 		// 钉钉机器人配置
+		appConfig.Push.DingTalk.Enabled = r.FormValue("dingtalk_enabled") == "on"
 		appConfig.Push.DingTalk.WebhookURL = r.FormValue("dingtalk_webhook")
 		appConfig.Push.DingTalk.Secret = r.FormValue("dingtalk_secret")
 
@@ -3632,8 +3634,9 @@ func saveConfigToFile() error {
 	lines := strings.Split(string(originalContent), "\n")
 	var result strings.Builder
 
-	// 预检 server 段内是否已有 password 行（没有则在 server: 行后插入）
+	// 预检 server 段内是否已有 password / reader_password 行（没有则在 server: 行后插入）
 	serverHasPassword := false
+	serverHasReaderPassword := false
 	serverIndent := "  " // server 段属性行缩进（默认 2 空格，与示例配置一致）
 	{
 		inServer := false
@@ -3648,7 +3651,14 @@ func saveConfigToFile() error {
 					inServer = false // 下一个顶级键，server 段结束
 				} else if strings.HasPrefix(t, "password:") {
 					serverHasPassword = true
-					break
+					if serverHasReaderPassword {
+						break
+					}
+				} else if strings.HasPrefix(t, "reader_password:") {
+					serverHasReaderPassword = true
+					if serverHasPassword {
+						break
+					}
 				} else if serverIndent == "  " && t != "" && !strings.HasPrefix(t, "#") {
 					// 记录段内第一个属性行的缩进，插入时保持一致
 					if i := len(l) - len(strings.TrimLeft(l, " \t")); i > 0 {
@@ -3661,6 +3671,28 @@ func saveConfigToFile() error {
 	inServerSection := false
 	inPromptsSection := false
 	inDataBackupSection := false
+
+	// 预检 push 段内是否已有 dingtalk 子段及子段缩进（没有则在 push: 行后插入）
+	pushHasDingTalk := strings.Contains(string(originalContent), "dingtalk:")
+	pushChildIndent := "    " // push 子段默认 4 空格缩进（与示例配置一致）
+	{
+		inPush := false
+		for _, l := range lines {
+			t := strings.TrimSpace(l)
+			if !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+				inPush = strings.HasPrefix(t, "push:")
+				continue
+			}
+			if inPush && t != "" && !strings.HasPrefix(t, "#") {
+				// push 段内第一个属性行（子段头或直接属性）的缩进
+				if i := len(l) - len(strings.TrimLeft(l, " \t")); i > 0 {
+					pushChildIndent = l[:i]
+				}
+				break
+			}
+		}
+	}
+	pushAttrIndent := pushChildIndent + "  "
 
 	// 预检 llm 段内是否已有 fallback 子段（没有则在 model 行后插入完整块）
 	llmHasFallbackSection := false
@@ -3722,10 +3754,15 @@ func saveConfigToFile() error {
 		// 检测区域
 		if strings.HasPrefix(trimmedLine, "server:") {
 			inServerSection = true
-			// server 段缺 password 行时紧跟 server: 行插入（缩进与段内属性行一致）
-			if !serverHasPassword {
+			// server 段缺 password / reader_password 行时紧跟 server: 行插入（缩进与段内属性行一致）
+			if !serverHasPassword || !serverHasReaderPassword {
 				result.WriteString(line + "\n")
-				result.WriteString(fmt.Sprintf("%spassword: %q\n", serverIndent, appConfig.Server.Password))
+				if !serverHasPassword {
+					result.WriteString(fmt.Sprintf("%spassword: %q\n", serverIndent, appConfig.Server.Password))
+				}
+				if !serverHasReaderPassword {
+					result.WriteString(fmt.Sprintf("%sreader_password: %q\n", serverIndent, appConfig.Server.ReaderPassword))
+				}
 				continue
 			}
 		} else if strings.HasPrefix(trimmedLine, "llm:") {
@@ -3777,11 +3814,22 @@ func saveConfigToFile() error {
 			inWebhookSection = false
 			inQQBotSection = false
 			inDingTalkSection = false
+			// push 段缺 dingtalk 子段时紧跟 push: 行插入（钉钉是后加的渠道，存量配置无此子段）
+			if !pushHasDingTalk {
+				result.WriteString(line + "\n")
+				result.WriteString(fmt.Sprintf("%sdingtalk:\n%senabled: true\n%swebhook_url: %q\n%ssecret: %q\n",
+					pushChildIndent, pushAttrIndent, pushAttrIndent, appConfig.Push.DingTalk.WebhookURL, pushAttrIndent, appConfig.Push.DingTalk.Secret))
+				continue
+			}
 		}
 
-		// 更新 server 段登录密码
-		if inServerSection && strings.Contains(line, "password:") {
-			line = updateYAMLValue(line, appConfig.Server.Password)
+		// 更新 server 段登录密码（精确前缀匹配：Contains 会误匹配 reader_password 行）
+		if inServerSection {
+			if strings.HasPrefix(trimmedLine, "password:") {
+				line = updateYAMLValue(line, appConfig.Server.Password)
+			} else if strings.HasPrefix(trimmedLine, "reader_password:") {
+				line = updateYAMLValue(line, appConfig.Server.ReaderPassword)
+			}
 		}
 
 		// 更新 LLM 配置
@@ -3874,7 +3922,9 @@ func saveConfigToFile() error {
 		}
 
 		if inDingTalkSection {
-			if strings.Contains(line, "webhook_url:") {
+			if strings.HasPrefix(trimmedLine, "enabled:") {
+				line = updateYAMLValue(line, fmt.Sprintf("%t", appConfig.Push.DingTalk.Enabled))
+			} else if strings.Contains(line, "webhook_url:") {
 				line = updateYAMLValue(line, appConfig.Push.DingTalk.WebhookURL)
 			} else if strings.Contains(line, "secret:") {
 				line = updateYAMLValue(line, appConfig.Push.DingTalk.Secret)
@@ -4459,6 +4509,7 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		settings.QQBotAppSecret = appConfig.Push.QQBot.AppSecret
 		settings.QQBotUserID = appConfig.Push.QQBot.UserID
 		// 钉钉机器人配置
+		settings.DingTalkEnabled = appConfig.Push.DingTalk.Enabled
 		settings.DingTalkWebhookURL = appConfig.Push.DingTalk.WebhookURL
 		settings.DingTalkSecret = appConfig.Push.DingTalk.Secret
 		// 代理配置

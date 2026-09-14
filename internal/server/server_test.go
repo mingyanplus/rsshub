@@ -142,8 +142,37 @@ func TestSaveConfigToFileServerPassword(t *testing.T) {
 		if !strings.Contains(s, "password: \"\"") || strings.Contains(s, "\"old\"") {
 			t.Errorf("password 未正确更新为空:\n%s", s)
 		}
-		if strings.Count(s, "password:") != 1 {
-			t.Errorf("password 行出现多次:\n%s", s)
+		// reader_password 行会被一并补插（新行为），按行首精确断言 password 不重复
+		if strings.Count(s, "\n  password:") != 1 || strings.Count(s, "\n  reader_password:") != 1 {
+			t.Errorf("password/reader_password 行数异常:\n%s", s)
+		}
+	})
+
+	t.Run("push段无dingtalk子段则插入", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		content := "server:\n  password: \"x\"\n\npush:\n  email:\n    password: \"smtp-pass\"\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		appConfig = &config.Config{}
+		appConfig.Push.DingTalk.Enabled = true
+		appConfig.Push.DingTalk.WebhookURL = "https://oapi.dingtalk.com/robot/send?access_token=tok"
+		appConfig.Push.DingTalk.Secret = "SEC123"
+		configFilePath = path
+		if err := saveConfigToFile(); err != nil {
+			t.Fatal(err)
+		}
+		out, _ := os.ReadFile(path)
+		s := string(out)
+		// 应插入 push 段内（缩进子段），而非顶级段
+		if !strings.Contains(s, "push:\n  dingtalk:\n    enabled: true\n") {
+			t.Errorf("dingtalk 子段未插入 push 段:\n%s", s)
+		}
+		if strings.Count(s, "dingtalk:") != 1 {
+			t.Errorf("dingtalk 段出现多次:\n%s", s)
+		}
+		if !strings.Contains(s, "secret: \"SEC123\"") {
+			t.Errorf("dingtalk secret 未写入:\n%s", s)
 		}
 	})
 }
