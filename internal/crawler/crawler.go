@@ -20,6 +20,18 @@ var HTTPClient = &http.Client{
 	Timeout: 30 * time.Second,
 }
 
+// fetchUserAgent 列表抓取用的 User-Agent；由 server 启动/热重载时从 feeds.fetch_user_agent
+// 注入（与原文抓取同源），留空回退内置标识
+var fetchUserAgent = "RSS-AI-Reader/1.0"
+
+// SetFetchUserAgent 设置列表抓取（RSS/HTML/JSON 源）的 User-Agent；ua 为空恢复默认
+func SetFetchUserAgent(ua string) {
+	if strings.TrimSpace(ua) == "" {
+		ua = "RSS-AI-Reader/1.0"
+	}
+	fetchUserAgent = ua
+}
+
 // SetProxy 设置内容抓取代理；proxyURL 为空时清除
 func SetProxy(proxyURL string) {
 	proxyutil.Apply(HTTPClient, proxyURL)
@@ -81,7 +93,7 @@ func fetchBytes(ctx context.Context, url, accept string) ([]byte, string, error)
 		return nil, "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "RSS-AI-Reader/1.0")
+	req.Header.Set("User-Agent", fetchUserAgent)
 	req.Header.Set("Accept", accept)
 
 	resp, err := HTTPClient.Do(req)

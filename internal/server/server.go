@@ -96,6 +96,10 @@ func SetConfig(cfg *config.Config) {
 		log.Printf("AI 客户端配置已热重载")
 	}
 
+	// 列表抓取 UA 与原文抓取同源（feeds.fetch_user_agent 统一供原文/列表/HTML/JSON 源使用），
+	// 启动与热重载均生效
+	crawler.SetFetchUserAgent(cfg.Feeds.FetchUserAgent)
+
 	applyProxyConfig()
 }
 
@@ -2553,11 +2557,21 @@ func fetchArticleOriginalContent(ctx context.Context, articleID int64, link stri
 	if appConfig != nil && appConfig.Feeds.FetchUserAgent != "" {
 		userAgent = appConfig.Feeds.FetchUserAgent
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", link, nil)
+	newFetch := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", link, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", userAgent)
+		// Referer 指向文章自身：满足来源站"来自本站"的防盗链校验
+		req.Header.Set("Referer", link)
+		return req, nil
+	}
+
+	req, err := newFetch()
 	if err != nil {
 		return "", "", fmt.Errorf("创建请求失败: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
 	resp, err := crawler.HTTPClient.Do(req)
 	if err != nil {
 		return "", "", fmt.Errorf("获取原文失败: %w", err)
@@ -2580,13 +2594,49 @@ func fetchArticleOriginalContent(ctx context.Context, articleID int64, link stri
 		return "", "", fmt.Errorf("读取响应失败: %w", err)
 	}
 
+	// JS 反爬壳页（19lou 系论坛 safeRedirect.htm 等）：HTTPClient 自动跟随 302 后拿到的是
+	// 一段「设 cookie 再跳回原址」的脚本，纯客户端不执行 JS。提取脚本里的 cookie 重试原链接即可通过
+	if name, value, ok := extractJSRedirectCookie(body); ok {
+		fmt.Printf("FetchOriginal: JS anti-bot shell detected, retrying %s with cookie %s\n", link, name)
+		req2, err := newFetch()
+		if err == nil {
+			req2.AddCookie(&http.Cookie{Name: name, Value: value})
+			if resp2, err := crawler.HTTPClient.Do(req2); err == nil {
+				body2, err2 := io.ReadAll(io.LimitReader(resp2.Body, maxFetchBodyBytes))
+				resp2.Body.Close()
+				if err2 == nil && resp2.StatusCode < 400 && len(body2) > len(body) {
+					body = body2
+				}
+			}
+		}
+	}
+
 	// GB2312/GBK 等非 UTF-8 站点直接解析会乱码：readability 前先转码。
 	// Reader 版流式转换，UTF-8 页面（绝大多数）零拷贝直达 readability
 	art, err := readability.FromReader(crawler.DecodeToUTF8Reader(body, "", resp.Header.Get("Content-Type")), req.URL)
 	if err != nil {
 		return "", "", fmt.Errorf("获取原文失败: %w", err)
 	}
-	return crawler.ApplyContentFilter(art.Content, appDB.ArticleContentFilter(articleID)), art.Title, nil
+	content = art.Content
+	if appDB != nil { // 测试环境可能未初始化数据库，跳过订阅源过滤
+		content = crawler.ApplyContentFilter(content, appDB.ArticleContentFilter(articleID))
+	}
+	return content, art.Title, nil
+}
+
+// extractJSRedirectCookie 识别 JS 反爬壳页并提取其设置的 cookie（如 19lou 系的
+// safeRedirect.htm：SetCookie("_Z3nY0d4C_","xxx") 后 location 跳回原址）。
+// 特征限定：小页面 + 同时含 SetCookie( 调用与 document.location 跳转，正常文章页不会命中
+func extractJSRedirectCookie(body []byte) (name, value string, ok bool) {
+	if len(body) > 4096 || !bytes.Contains(body, []byte(`SetCookie("`)) || !bytes.Contains(body, []byte("document.location.href")) {
+		return "", "", false
+	}
+	re := regexp.MustCompile(`SetCookie\("([^"]+)","([^"]+)"`)
+	m := re.FindSubmatch(body)
+	if len(m) != 3 {
+		return "", "", false
+	}
+	return string(m[1]), string(m[2]), true
 }
 
 // noContentMarkReason 无正文无摘要且自动抓取原文失败时的出队标记文案

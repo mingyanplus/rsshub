@@ -59,7 +59,7 @@ func (s *JsonSource) FetchAndParse(ctx context.Context) (*Feed, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("User-Agent", "RSS-AI-Reader/1.0")
+	req.Header.Set("User-Agent", fetchUserAgent)
 	for k, v := range s.config.Headers {
 		req.Header.Set(k, v)
 	}

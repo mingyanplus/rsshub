@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,4 +145,69 @@ func withCookie(setCookie string) *http.Request {
 		req.Header.Set("Cookie", kv)
 	}
 	return req
+}
+
+// JS 反爬壳页 cookie 提取（19lou 系 safeRedirect 模式）
+func TestExtractJSRedirectCookie(t *testing.T) {
+	shell := []byte(`<html><head></head><body></body></html><script>SetCookie("_Z3nY0d4C_","37XgPK9h",365,"/",domain);document.location.href=redirectUrl</script>`)
+	name, value, ok := extractJSRedirectCookie(shell)
+	if !ok || name != "_Z3nY0d4C_" || value != "37XgPK9h" {
+		t.Errorf("extract = (%q,%q,%v), want (_Z3nY0d4C_,37XgPK9h,true)", name, value, ok)
+	}
+
+	// 正常文章页（大、无壳特征）不应命中
+	normal := []byte("<html><body>" + strings.Repeat("正文内容很长。", 1000) + "</body></html>")
+	if _, _, ok := extractJSRedirectCookie(normal); ok {
+		t.Error("normal article page should not match")
+	}
+	// 小页面但无 SetCookie 调用也不命中
+	if _, _, ok := extractJSRedirectCookie([]byte(`<script>document.location.href="/x"</script>`)); ok {
+		t.Error("page without SetCookie should not match")
+	}
+}
+
+// 端到端：模拟 19lou 系三段式反爬（302→JS 壳→带 cookie 放行），fetchOriginal 应自动通过
+func TestFetchOriginalJSAntiBotBypass(t *testing.T) {
+	cookieSeen := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie("_Z3nY0d4C_"); err == nil && c.Value == "37XgPK9h" {
+			cookieSeen = c.Value
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(`<html><head><title>被反爬保护的文章</title></head><body><article><p>这是通过 cookie 绕过反爬后拿到的正文内容。</p></article></body></html>`))
+			return
+		}
+		http.Redirect(w, r, "/safeRedirect.htm?"+r.URL.Path, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	// /safeRedirect.htm 返回 JS 壳（设 cookie 跳回）
+	mux := http.NewServeMux()
+	mux.HandleFunc("/safeRedirect.htm", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><head></head><body></body></html><script>SetCookie("_Z3nY0d4C_","37XgPK9h",365,"/",domain);document.location.href=redirectUrl</script>`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie("_Z3nY0d4C_"); err == nil && c.Value == "37XgPK9h" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(`<html><head><title>被反爬保护的文章</title></head><body><article><p>这是通过 cookie 绕过反爬后拿到的正文内容。</p></article></body></html>`))
+			return
+		}
+		http.Redirect(w, r, "/safeRedirect.htm?"+r.URL.Path, http.StatusFound)
+	})
+	_ = srv
+	srv2 := httptest.NewServer(mux)
+	defer srv2.Close()
+	_ = cookieSeen
+
+	ctx := context.Background()
+	content, title, err := fetchArticleOriginalContent(ctx, 0, srv2.URL+"/thread-1.html")
+	if err != nil {
+		t.Fatalf("fetchArticleOriginalContent failed: %v", err)
+	}
+	if title != "被反爬保护的文章" {
+		t.Errorf("title = %q, want 被反爬保护的文章", title)
+	}
+	if !strings.Contains(content, "绕过反爬后拿到的正文") {
+		t.Errorf("content missing bypassed body: %q", content)
+	}
 }
