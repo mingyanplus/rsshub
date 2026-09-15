@@ -1218,7 +1218,7 @@ func analyzeArticleAsync(articleID int64, title, content, description, link stri
 	fmt.Printf("Article %d analyzed: isAd=%v, keywords=%s\n", articleID, result.IsAd, keywords)
 
 	// 检查关注规则并发送推送
-	checkAndNotifyFollowRules(articleID, title, result.Summary, result.Keywords, "")
+	checkAndNotifyFollowRules(articleID, title, result.Summary, result.Keywords, link)
 }
 
 // CheckAllArticlesFollowRules 检查所有文章的关注规则推送（用于初始化或手动触发）
