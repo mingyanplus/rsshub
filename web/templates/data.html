@@ -11,7 +11,7 @@
                     <p class="text-sm text-gray-500">数据库大小</p>
                     <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.DatabaseSize}}</p>
                 </div>
-                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <div class="w-10 h-10 flex items-center justify-center">
                     <span class="text-xl">💾</span>
                 </div>
             </div>
@@ -23,7 +23,7 @@
                     <p class="text-sm text-gray-500">文章总数</p>
                     <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.TotalArticles}}</p>
                 </div>
-                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                <div class="w-10 h-10 flex items-center justify-center">
                     <span class="text-xl">📄</span>
                 </div>
             </div>
@@ -36,7 +36,7 @@
                     <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.EmbeddingCount}}</p>
                     <p class="text-xs text-gray-400 mt-1">文章向量，另有总结向量 {{.Stats.SummaryEmbeddingCount}} 条</p>
                 </div>
-                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <div class="w-10 h-10 flex items-center justify-center">
                     <span class="text-xl">🧮</span>
                 </div>
             </div>
@@ -48,7 +48,7 @@
                     <p class="text-sm text-gray-500">最近备份</p>
                     <p class="text-2xl font-bold text-gray-900 mt-1">{{.Stats.LastBackup}}</p>
                 </div>
-                <div class="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
+                <div class="w-10 h-10 flex items-center justify-center">
                     <span class="text-xl">📦</span>
                 </div>
             </div>
@@ -72,24 +72,21 @@
             <span>🗃️</span> 数据库备份
             <span class="text-xs text-gray-400 font-normal">SQLite 一致性快照（VACUUM INTO），存于库文件同目录 backups/ 下</span>
         </h3>
-        <div class="flex flex-wrap items-end gap-4 mb-4">
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">自动备份</label>
-                <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" id="bk-auto-enable" class="w-4 h-4 text-blue-600 rounded">
-                    <span class="text-sm text-gray-600">定时自动备份</span>
-                </label>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">备份间隔（小时）</label>
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-3 mb-4">
+            <label class="flex items-center gap-2 cursor-pointer text-sm font-medium text-gray-700">
+                <input type="checkbox" id="bk-auto-enable" class="w-4 h-4 text-blue-600 rounded">
+                自动备份
+            </label>
+            <div class="flex items-center gap-2">
+                <label for="bk-interval" class="text-sm text-gray-600 whitespace-nowrap">间隔（小时）</label>
                 <input type="number" id="bk-interval" min="1" max="720" value="24"
-                       class="w-28 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                       class="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">保留上限（个）</label>
+            <div class="flex items-center gap-2">
+                <label for="bk-max-files" title="超出上限自动删除最旧的备份"
+                       class="text-sm text-gray-600 whitespace-nowrap">保留上限（个）</label>
                 <input type="number" id="bk-max-files" min="1" max="100" value="7"
-                       class="w-28 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
-                <p class="text-xs text-gray-400 mt-0.5">超出上限自动删除最旧的备份</p>
+                       class="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="flex gap-2 ml-auto">
                 <button onclick="saveBackupConfig(this)"
