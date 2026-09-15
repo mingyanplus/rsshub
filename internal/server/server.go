@@ -908,6 +908,8 @@ func RefreshFeed(w http.ResponseWriter, r *http.Request) {
 			}
 			newCount++
 
+			content = listBodyPrefetch(feed.SourceType, articleID, item.Link, item.Title, content)
+
 			// 收集新文章用于后续 AI 分析
 			newArticles = append(newArticles, struct {
 				id          int64
@@ -1040,13 +1042,13 @@ func analyzeArticleAsync(articleID int64, title, content, description, link stri
 	ctx, cancel := context.WithTimeout(context.Background(), analyzeCtxTimeout())
 	defer cancel()
 
-	// 使用内容或描述
+	// 使用内容或描述；非空但仅为标题复读（列表源假正文，见 listBodyMissing）时同样
+	// 视为缺失：降级摘要，再缺失则自动抓取一次原文；失败则标记跳过
 	text := content
-	if text == "" {
+	if listBodyMissing(text, title) {
 		text = description
 	}
-	// 正文与摘要都为空（如列表型 feed）：自动抓取一次原文再分析；失败则标记跳过
-	if text == "" {
+	if listBodyMissing(text, title) {
 		if text = tryFetchArticleContent(articleID, link); text == "" {
 			markArticleNoContent(articleID, noContentMarkReason)
 			return
@@ -2639,6 +2641,31 @@ func extractJSRedirectCookie(body []byte) (name, value string, ok bool) {
 	return string(m[1]), string(m[2]), true
 }
 
+// listBodyMissing 判断文章正文是否缺乏实际内容：去标签去空白后为空，或与标题完全相同
+// （列表源摘要常只是标题复读的「假正文」，非空但不可作 AI 分析输入）。分析取文与
+// 入库预取共用的判定，保证抓取失败后各路径仍能正确降级
+func listBodyMissing(content, title string) bool {
+	if content == "" {
+		return true
+	}
+	text := strings.Join(strings.Fields(stripHTMLSimple(content)), "")
+	return text == "" || text == strings.Join(strings.Fields(title), "")
+}
+
+// listBodyPrefetch HTML/JSON 列表源入库时的正文预取：对「非空但仅是标题复读」的假正文
+// 主动抓一次原文（成功已写回 DB，报告/embedding 等所有读库路径均可用全文）。只处理
+// 假正文——完全为空的正文不在此处抓，分析阶段的兜底会对空正文自动抓取，此处抓会
+// 同轮重复请求；抓取失败原样返回，分析路径对假正文有同样的判定兜底
+func listBodyPrefetch(sourceType string, articleID int64, link, title, content string) string {
+	if (sourceType != "html" && sourceType != "json") || content == "" || !listBodyMissing(content, title) {
+		return content
+	}
+	if fetched := tryFetchArticleContent(articleID, link); fetched != "" {
+		return fetched
+	}
+	return content
+}
+
 // noContentMarkReason 无正文无摘要且自动抓取原文失败时的出队标记文案
 const noContentMarkReason = "文章无正文与摘要，自动抓取原文失败，已跳过分析"
 
@@ -2669,14 +2696,15 @@ func tryFetchArticleContent(id int64, link string) string {
 }
 
 // resolveAnalysisText 返回文章可进入 AI 分析的文本：正文 → 摘要 → 自动抓取一次原文。
+// 正文/摘要非空但仅为标题复读（列表源假正文）时同样降级（见 listBodyMissing）。
 // 抓取失败或提取为空时返回 ""：无总结的文章标记出队；已有总结的文章计一次处理失败
 // （复用 IncrementProcessAttempts 的 3 次死信机制，避免每轮调度重复抓取同一死链）
 func resolveAnalysisText(article *models.Article) string {
 	text := article.Content
-	if text == "" {
+	if listBodyMissing(text, article.Title) {
 		text = article.Summary
 	}
-	if text != "" {
+	if !listBodyMissing(text, article.Title) {
 		return text
 	}
 	if text = tryFetchArticleContent(article.ID, article.Link); text != "" {
@@ -6409,6 +6437,8 @@ func RefreshFeedInternal(feedID int64) error {
 				continue
 			}
 			newCount++
+
+			content = listBodyPrefetch(feed.SourceType, articleID, item.Link, item.Title, content)
 
 			newArticles = append(newArticles, struct {
 				id          int64
