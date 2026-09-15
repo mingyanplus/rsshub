@@ -642,6 +642,7 @@ async function fetchOriginalContent() {
 // 筛选条件变化时重新加载
 ['filter-feed', 'filter-category', 'filter-hide-ads', 'filter-read-status'].forEach(id => {
     document.getElementById(id).addEventListener('change', () => {
+        saveFilterPrefs();
         currentOffset = 0;
         hasMore = true;
         loadArticles(false);
@@ -651,6 +652,7 @@ async function fetchOriginalContent() {
 // 排序模式切换（最新 / 为你精选 / 拓展发现）
 document.getElementById('sort-mode').addEventListener('change', (e) => {
     recommendMode = e.target.value !== 'latest';
+    saveFilterPrefs();
     currentOffset = 0;
     hasMore = true;
     loadArticles(false);
@@ -698,6 +700,38 @@ function clearTagFilter() {
 
 // 初始化
 initTagFilter();
+
+// 筛选偏好持久化：记住订阅源/分类/隐藏广告/阅读状态/排序模式，下次访问自动恢复
+const FILTER_PREFS_KEY = 'articles-filter-prefs';
+function saveFilterPrefs() {
+    try {
+        localStorage.setItem(FILTER_PREFS_KEY, JSON.stringify({
+            feed: document.getElementById('filter-feed').value,
+            category: document.getElementById('filter-category').value,
+            hideAds: document.getElementById('filter-hide-ads').checked,
+            readStatus: document.getElementById('filter-read-status').value,
+            sortMode: document.getElementById('sort-mode').value,
+        }));
+    } catch (e) { /* 存储不可用（隐私模式等）时忽略 */ }
+}
+(function restoreFilterPrefs() {
+    let prefs;
+    try {
+        prefs = JSON.parse(localStorage.getItem(FILTER_PREFS_KEY));
+    } catch (e) { return; }
+    if (!prefs) return;
+    const setSelect = (id, val, fallback = '') => {
+        const el = document.getElementById(id);
+        el.value = val;
+        if (el.value !== String(val)) el.value = fallback; // 选项已不存在（如订阅源下线）时回退默认
+    };
+    setSelect('filter-feed', prefs.feed || '');
+    setSelect('filter-category', prefs.category || '');
+    document.getElementById('filter-hide-ads').checked = prefs.hideAds !== false;
+    setSelect('filter-read-status', prefs.readStatus || '');
+    setSelect('sort-mode', prefs.sortMode || 'recommend', 'recommend');
+    recommendMode = document.getElementById('sort-mode').value !== 'latest';
+})();
 
 // 所有图片不发送 Referer，避免来源站防盗链拦截
 const previewBody = document.getElementById('preview-body');
