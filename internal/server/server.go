@@ -96,6 +96,11 @@ func SetConfig(cfg *config.Config) {
 		log.Printf("AI 客户端配置已热重载")
 	}
 
+	// 热重载日报提示词覆盖（启动时 reportGenerator 尚未注入，首次应用由 main.go 完成）
+	if reportGenerator != nil {
+		reportGenerator.SetPromptOverrides(cfg.Prompts.ReportFeatured, cfg.Prompts.ReportBrief, cfg.Prompts.ReportTopicStory)
+	}
+
 	// 列表抓取 UA 与原文抓取同源（feeds.fetch_user_agent 统一供原文/列表/HTML/JSON 源使用），
 	// 启动与热重载均生效
 	crawler.SetFetchUserAgent(cfg.Feeds.FetchUserAgent)
@@ -280,6 +285,9 @@ type SettingsData struct {
 	ReaderPassword        string
 	PromptAnalyzeSystem   string
 	PromptTranslateSystem string
+	PromptReportFeatured  string
+	PromptReportBrief     string
+	PromptReportTopicStory string
 }
 
 type CategoryData struct {
@@ -3359,6 +3367,27 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 			appAnalyzer.SetPromptOverrides(analyzePrompt, translatePrompt)
 		}
 
+		// 日报提示词覆盖（与内置默认相同则存空 = 使用内置）
+		reportFeatured := strings.TrimSpace(r.FormValue("prompt_report_featured"))
+		if reportFeatured == processor.UniversalFeaturedPrompt {
+			reportFeatured = ""
+		}
+		reportBrief := strings.TrimSpace(r.FormValue("prompt_report_brief"))
+		if reportBrief == processor.UniversalBriefPrompt {
+			reportBrief = ""
+		}
+		reportTopicStory := strings.TrimSpace(r.FormValue("prompt_report_topic_story"))
+		// 常量尾部为拼接素材预留的空行，比较需同样 TrimSpace 才能与表单值对齐
+		if reportTopicStory == strings.TrimSpace(processor.UniversalTopicStoryInstruction) {
+			reportTopicStory = ""
+		}
+		appConfig.Prompts.ReportFeatured = reportFeatured
+		appConfig.Prompts.ReportBrief = reportBrief
+		appConfig.Prompts.ReportTopicStory = reportTopicStory
+		if reportGenerator != nil {
+			reportGenerator.SetPromptOverrides(reportFeatured, reportBrief, reportTopicStory)
+		}
+
 		// 保存到配置文件
 		if err := saveConfigToFile(); err != nil {
 			w.Header().Set("Content-Type", "text/html")
@@ -3824,6 +3853,12 @@ func saveConfigToFile() error {
 				line = updateYAMLValue(line, appConfig.Prompts.AnalyzeSystem)
 			} else if strings.Contains(line, "translate_system:") {
 				line = updateYAMLValue(line, appConfig.Prompts.TranslateSystem)
+			} else if strings.Contains(line, "report_featured:") {
+				line = updateYAMLValue(line, appConfig.Prompts.ReportFeatured)
+			} else if strings.Contains(line, "report_brief:") {
+				line = updateYAMLValue(line, appConfig.Prompts.ReportBrief)
+			} else if strings.Contains(line, "report_topic_story:") {
+				line = updateYAMLValue(line, appConfig.Prompts.ReportTopicStory)
 			}
 		}
 
@@ -4060,8 +4095,9 @@ func saveConfigToFile() error {
 
 	// prompts 段：文件中没有时追加到尾部（已有则在上面循环中行内更新）
 	if !strings.Contains(string(originalContent), "prompts:") {
-		result.WriteString(fmt.Sprintf("\n# 提示词覆盖（留空使用内置默认，可在设置页编辑）\nprompts:\n  analyze_system: %q\n  translate_system: %q\n",
-			appConfig.Prompts.AnalyzeSystem, appConfig.Prompts.TranslateSystem))
+		result.WriteString(fmt.Sprintf("\n# 提示词覆盖（留空使用内置默认，可在设置页编辑）\nprompts:\n  analyze_system: %q\n  translate_system: %q\n  report_featured: %q\n  report_brief: %q\n  report_topic_story: %q\n",
+			appConfig.Prompts.AnalyzeSystem, appConfig.Prompts.TranslateSystem,
+			appConfig.Prompts.ReportFeatured, appConfig.Prompts.ReportBrief, appConfig.Prompts.ReportTopicStory))
 	}
 
 	// data_backup 段：文件中没有时追加到尾部（已有则在上面循环中行内更新）
@@ -4612,6 +4648,18 @@ func SettingsPage(w http.ResponseWriter, r *http.Request) {
 		}
 		if appConfig.Prompts.TranslateSystem != "" {
 			settings.PromptTranslateSystem = appConfig.Prompts.TranslateSystem
+		}
+		settings.PromptReportFeatured = processor.UniversalFeaturedPrompt
+		settings.PromptReportBrief = processor.UniversalBriefPrompt
+		settings.PromptReportTopicStory = processor.UniversalTopicStoryInstruction
+		if appConfig.Prompts.ReportFeatured != "" {
+			settings.PromptReportFeatured = appConfig.Prompts.ReportFeatured
+		}
+		if appConfig.Prompts.ReportBrief != "" {
+			settings.PromptReportBrief = appConfig.Prompts.ReportBrief
+		}
+		if appConfig.Prompts.ReportTopicStory != "" {
+			settings.PromptReportTopicStory = appConfig.Prompts.ReportTopicStory
 		}
 	}
 

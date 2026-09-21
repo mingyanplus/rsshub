@@ -6,6 +6,7 @@ import (
 	"rss-ai/internal/ai"
 	"rss-ai/internal/models"
 	"strings"
+	"sync"
 )
 
 // htmlTagRegex 匹配 HTML 标签的正则表达式
@@ -97,6 +98,13 @@ const (
 }
 
 注意：只输出 JSON，不要包含任何其他文字或 markdown 代码块标记。`
+
+	// UniversalTopicStoryInstruction 话题故事提示词（话题报告 150-250 字综合报道）
+	// 可通过 config.yaml 的 prompts.report_topic_story 覆盖（设置页可编辑）。
+	UniversalTopicStoryInstruction = "你是一名新闻编辑，请基于以下同一话题的多篇报道，撰写一段150-250字的综合报道。\n要求：客观陈述事实，综合各来源信息，不添加推测，不使用夸张措辞。\n\n"
+
+	// TopicStoryClosing 话题故事输出格式约束（固定附加在素材之后，不开放覆盖）
+	TopicStoryClosing = "只输出报道正文。"
 )
 
 // TopicMatcher 主题匹配器（简化版，主要提供分组信息）
@@ -138,11 +146,55 @@ func buildPersona(domain string) string {
 }
 
 // PromptBuilder 提示词构建器
-type PromptBuilder struct{}
+type PromptBuilder struct {
+	mu                 sync.RWMutex
+	featuredOverride   string // 重点报道模板覆盖（空=内置默认）
+	briefOverride      string // 简讯模板覆盖（空=内置默认）
+	topicStoryOverride string // 话题故事提示词覆盖（空=内置默认）
+}
 
 // NewPromptBuilder 创建提示词构建器
 func NewPromptBuilder() *PromptBuilder {
 	return &PromptBuilder{}
+}
+
+// SetOverrides 设置日报提示词覆盖（空字符串表示使用内置默认，支持热重载）
+func (b *PromptBuilder) SetOverrides(featured, brief, topicStory string) {
+	b.mu.Lock()
+	b.featuredOverride = strings.TrimSpace(featured)
+	b.briefOverride = strings.TrimSpace(brief)
+	b.topicStoryOverride = strings.TrimSpace(topicStory)
+	b.mu.Unlock()
+}
+
+// featuredTemplate 返回当前生效的重点报道模板
+func (b *PromptBuilder) featuredTemplate() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.featuredOverride != "" {
+		return b.featuredOverride
+	}
+	return UniversalFeaturedPrompt
+}
+
+// briefTemplate 返回当前生效的简讯模板
+func (b *PromptBuilder) briefTemplate() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.briefOverride != "" {
+		return b.briefOverride
+	}
+	return UniversalBriefPrompt
+}
+
+// topicStoryInstruction 返回当前生效的话题故事提示词
+func (b *PromptBuilder) topicStoryInstruction() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.topicStoryOverride != "" {
+		return b.topicStoryOverride
+	}
+	return UniversalTopicStoryInstruction
 }
 
 // BuildFeaturedPrompt 构建重点报道提示词（动态注入 LLM 分组信息）
@@ -150,7 +202,7 @@ func (b *PromptBuilder) BuildFeaturedPrompt(cluster *models.ArticleCluster, _ *m
 	materials := b.buildMaterials(cluster)
 
 	// 动态填充模板
-	result := UniversalFeaturedPrompt
+	result := b.featuredTemplate()
 	result = strings.ReplaceAll(result, "{{domain}}", cluster.Domain)
 	result = strings.ReplaceAll(result, "{{topic_name}}", cluster.Name)
 	result = strings.ReplaceAll(result, "{{tags}}", strings.Join(cluster.RepresentativeTags, ", "))
@@ -164,7 +216,7 @@ func (b *PromptBuilder) BuildBriefPrompt(cluster *models.ArticleCluster, _ *mode
 	materials := b.buildMaterials(cluster)
 
 	// 动态填充模板
-	result := UniversalBriefPrompt
+	result := b.briefTemplate()
 	result = strings.ReplaceAll(result, "{{topic_name}}", cluster.Name)
 	result = strings.ReplaceAll(result, "{{materials}}", materials)
 

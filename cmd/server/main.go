@@ -168,6 +168,8 @@ func main() {
 
 	channels := strings.Join(channelsList, ",")
 	reportGen := processor.NewReportGenerator(db, analyzer, notifyMgr, channels)
+	// 启动时应用日报提示词覆盖（SetConfig 先于注入执行，reportGenerator 当时为 nil）
+	reportGen.SetPromptOverrides(cfg.Prompts.ReportFeatured, cfg.Prompts.ReportBrief, cfg.Prompts.ReportTopicStory)
 	server.SetReportGenerator(reportGen)
 	server.SetNotifyMgr(notifyMgr)
 	logger.Info("Report generator initialized, push channels: [%s]", channels)

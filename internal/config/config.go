@@ -81,8 +81,11 @@ type TopicCategoryConfig struct {
 
 // PromptsConfig 提示词覆盖（留空使用程序内置默认，设置页可编辑）
 type PromptsConfig struct {
-	AnalyzeSystem   string `mapstructure:"analyze_system"`   // 文章分析 system 提示词
-	TranslateSystem string `mapstructure:"translate_system"` // 翻译 system 提示词
+	AnalyzeSystem    string `mapstructure:"analyze_system"`    // 文章分析 system 提示词
+	TranslateSystem  string `mapstructure:"translate_system"`  // 翻译 system 提示词
+	ReportFeatured   string `mapstructure:"report_featured"`   // 日报重点报道提示词
+	ReportBrief      string `mapstructure:"report_brief"`      // 日报简讯提示词
+	ReportTopicStory string `mapstructure:"report_topic_story"` // 话题报告故事提示词
 }
 
 // ProxyConfig 代理配置：获取内容（RSS 抓取/原文获取）与 LLM 接口可分别启用

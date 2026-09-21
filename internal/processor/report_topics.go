@@ -227,8 +227,7 @@ func (g *ReportGenerator) generateTopicStory(topic *models.Topic) string {
 		return topic.AISummary
 	}
 	prompt := buildTopicDigestPrompt(topic.Title, topic.LatestArticles,
-		"你是一名新闻编辑，请基于以下同一话题的多篇报道，撰写一段150-250字的综合报道。\n要求：客观陈述事实，综合各来源信息，不添加推测，不使用夸张措辞。\n\n",
-		"只输出报道正文。")
+		g.promptBuilder.topicStoryInstruction(), TopicStoryClosing)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

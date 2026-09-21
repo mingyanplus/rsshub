@@ -77,6 +77,11 @@ func (g *ReportGenerator) SetBaseURL(url string) {
 	g.baseURL = url
 }
 
+// SetPromptOverrides 设置日报提示词覆盖（空=内置默认，支持热重载）
+func (g *ReportGenerator) SetPromptOverrides(featured, brief, topicStory string) {
+	g.promptBuilder.SetOverrides(featured, brief, topicStory)
+}
+
 // Generate 生成报告
 func (g *ReportGenerator) Generate(reportType string) (*models.Report, error) {
 	log.Printf("开始生成 %s 报告...", reportType)

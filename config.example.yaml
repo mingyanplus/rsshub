@@ -126,3 +126,6 @@ event_matcher:
 prompts:
   analyze_system: ""
   translate_system: ""
+  report_featured: ""        # 日报重点报道提示词（占位符 domain/topic_name/tags/materials）
+  report_brief: ""           # 日报简讯提示词（占位符 topic_name/materials）
+  report_topic_story: ""     # 话题报告故事提示词（素材由程序附加）
