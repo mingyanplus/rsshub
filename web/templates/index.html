@@ -1,4 +1,8 @@
 {{define "content"}}
+<style>
+/* 文章弹窗正文排版：与文章列表预览共用同一组 #preview-body 样式 */
+{{template "preview-body-styles"}}
+</style>
 <div class="space-y-6">
     <!-- 统计卡片 -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -294,6 +298,10 @@ async function showArticleDetail(id) {
         const res = await fetch(`/api/articles/${id}`);
         const article = await res.json();
 
+        const body = article.content || article.summary || '暂无内容';
+        // 与文章列表预览一致：HTML 内容直接渲染，纯文本按空行拆成段落
+        const bodyHtml = (body.includes('<') && body.includes('>')) ? body : formatContent(body);
+
         content.innerHTML = `
             <div class="space-y-4">
                 <div class="flex items-center gap-2 flex-wrap">
@@ -308,8 +316,8 @@ async function showArticleDetail(id) {
                     ${article.keywords.split(',').map(k => `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">${escapeHtml(k.trim())}</span>`).join('')}
                 </div>
                 ` : ''}
-                <div class="prose prose-sm max-w-none text-gray-700 leading-relaxed">
-                    ${article.content || article.summary || '暂无内容'}
+                <div id="preview-body" class="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                    ${bodyHtml}
                 </div>
                 ${article.link ? `<a href="${article.link}" target="_blank" class="inline-flex items-center gap-1 text-blue-500 hover:underline underline text-sm">查看原文 ↗</a>` : ''}
             </div>
