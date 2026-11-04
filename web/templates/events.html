@@ -589,7 +589,8 @@ function optimizeEvent() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
     })
-        .then(res => res.json())
+        // 后端错误返回纯文本，res.json() 会抛 SyntaxError，先降级读文本透出真实错误
+        .then(res => res.json().catch(() => res.text().then(t => { throw new Error(t || ('HTTP ' + res.status)); })))
         .then(data => {
             console.log('优化返回数据:', data);  // 调试日志
             if (data.error) {
