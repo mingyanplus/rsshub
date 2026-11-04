@@ -1878,7 +1878,7 @@ func cleanWhitespace(text string) string {
 func (d *DB) CreateEventTrack(event *models.EventTrack) (int64, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO event_tracks (name, keywords, negative_keywords, description, roles, embedding, status, is_auto, match_count, last_match_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, event.Name, event.Keywords, event.NegativeKeywords, event.Description, event.Roles, event.Embedding, event.Status, event.IsAuto, event.MatchCount, event.LastMatchAt)
 	if err != nil {
 		return 0, err
