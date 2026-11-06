@@ -274,6 +274,9 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 		// AI 处理间隔（默认10分钟）
 		aiProcessInterval := 10 * time.Minute
 
+		// 失败文章定时复活间隔（每小时限量放回，避免 LLM 长时间故障后死信永久积压）
+		failedRetryInterval := 1 * time.Hour
+
 		// 热点检测间隔（默认6小时）
 		hotTopicInterval := 6 * time.Hour
 
@@ -299,6 +302,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 
 		refreshTicker := time.NewTicker(refreshInterval)
 		aiTicker := time.NewTicker(aiProcessInterval)
+		failedRetryTicker := time.NewTicker(failedRetryInterval) // 失败文章限量复活
 		reportCheckTicker := time.NewTicker(1 * time.Minute) // 每分钟检查一次早晚报
 		hotTopicTicker := time.NewTicker(hotTopicInterval)   // 热点检测
 		lifecycleTicker := time.NewTicker(lifecycleCheckInterval) // 生命周期检查
@@ -329,6 +333,7 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 			case <-stopChan:
 				refreshTicker.Stop()
 				aiTicker.Stop()
+				failedRetryTicker.Stop()
 				reportCheckTicker.Stop()
 				hotTopicTicker.Stop()
 				lifecycleTicker.Stop()
@@ -349,6 +354,9 @@ func startScheduler(db *database.DB, cfg *config.Config, reportGen *processor.Re
 				// 异步执行：批量分析耗时可能超过 tick 间隔，同步执行会阻塞整个
 				// 调度循环（RSS 刷新/早晚报/热点检测全部停摆）且丢弃错过的 tick
 				go processPendingArticles(db)
+
+			case <-failedRetryTicker.C:
+				go retryFailedArticles(db)
 
 			case <-dataBackupTicker.C:
 				// 数据库自动备份：距最近备份文件超过配置间隔才执行（内部自判，含超限清理）
@@ -482,6 +490,22 @@ func refreshAllFeeds(db *database.DB) error {
 	}
 
 	return nil
+}
+
+// retryFailedArticles 定时复活失败文章：每小时限量放回队列并立即触发一轮处理。
+// LLM 长时间故障（key 耗尽/宕机）导致的死信不再永久积压；单次失败的文章
+// 仍走 10 分钟调度轮的正常重试，不经此路径
+func retryFailedArticles(db *database.DB) {
+	const batch = 10
+	n, err := db.ResetFailedArticlesLimited(batch)
+	if err != nil {
+		logger.Error("Failed to reset failed articles: %v", err)
+		return
+	}
+	if n > 0 {
+		logger.Info("Auto-retried %d failed articles", n)
+		processPendingArticles(db) // 内部有 aiProcessingRunning 互斥，正忙时跳过、由下一轮兜底
+	}
 }
 
 // processPendingArticles 处理待分析的文章（包括未处理和不完整的）

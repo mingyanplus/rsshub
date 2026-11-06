@@ -1,8 +1,10 @@
 package database
 
 import (
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"rss-ai/internal/models"
 )
@@ -387,4 +389,91 @@ func TestArticleContentFilter(t *testing.T) {
 	if got := db.ArticleContentFilter(999999); got != "" {
 		t.Errorf("不存在文章应返回空串, got %q", got)
 	}
+}
+
+func TestResetFailedArticles(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "rss_test*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpfile.Close() // Windows 上 SQLite 无法打开仍被写入句柄持有的文件
+	defer os.Remove(tmpfile.Name())
+	db, err := New(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer db.Close()
+
+	feedID, err := db.CreateFeed(&models.Feed{Title: "复活测试源", URL: "https://retry.example.com", IsActive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]int64, 4)
+	for i := range ids {
+		id, err := db.CreateArticle(&models.Article{
+			FeedID: feedID, Title: "文章", Link: fmt.Sprintf("https://retry.example.com/a%d", i),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = id
+	}
+
+	// 构造失败态：A=未处理路径死信 B=incomplete 软死信 C=重试期内 D=第二批死信（限量测试用）
+	// fetched_at 依次变老，验证限量复活按最老优先
+	setFailed := func(id int64, keywords string, attempts int, age time.Duration) {
+		t.Helper()
+		_, err := db.db.Exec(
+			`UPDATE articles SET keywords=?, process_attempts=?, process_error='boom', fetched_at=? WHERE id=?`,
+			keywords, attempts, time.Now().Add(-age), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	setFailed(ids[0], "处理失败", 3, 4*time.Hour)
+	setFailed(ids[1], "科技", 3, 3*time.Hour)
+	setFailed(ids[2], "科技", 2, 2*time.Hour)
+	setFailed(ids[3], "处理失败", 5, 1*time.Hour)
+
+	check := func(id int64, wantKeywords string, wantAttempts int) {
+		t.Helper()
+		var keywords string
+		var attempts int
+		if err := db.db.QueryRow(
+			`SELECT COALESCE(keywords,''), COALESCE(process_attempts,0) FROM articles WHERE id=?`, id,
+		).Scan(&keywords, &attempts); err != nil {
+			t.Fatal(err)
+		}
+		if keywords != wantKeywords || attempts != wantAttempts {
+			t.Errorf("article %d: keywords=%q attempts=%d, want keywords=%q attempts=%d", id, keywords, attempts, wantKeywords, wantAttempts)
+		}
+	}
+
+	// 手动全量重置：A/B/D 复活，重试期内的 C 不受影响；软死信 B 的真实标签保留
+	n, err := db.ResetFailedArticles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("ResetFailedArticles() = %d, want 3", n)
+	}
+	check(ids[0], "", 0)
+	check(ids[1], "科技", 0)
+	check(ids[2], "科技", 2)
+	check(ids[3], "", 0)
+
+	// 限量重置：重新构造 3 篇死信，每次只复活最老的 1 篇
+	setFailed(ids[0], "处理失败", 3, 4*time.Hour)
+	setFailed(ids[1], "科技", 3, 3*time.Hour)
+	setFailed(ids[3], "处理失败", 3, 1*time.Hour)
+	n, err = db.ResetFailedArticlesLimited(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("ResetFailedArticlesLimited(1) = %d, want 1", n)
+	}
+	check(ids[0], "", 0)    // 最老，被复活
+	check(ids[1], "科技", 3) // 仍在失败态
+	check(ids[3], "处理失败", 3)
 }

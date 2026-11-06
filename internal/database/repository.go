@@ -437,8 +437,11 @@ func (d *DB) GetArticlesByQueryType(queryType ArticleQueryType, limit int) ([]*m
 		// 排除广告文章
 		// 注意：不含 translated_content——翻译仅对非中文内容生成，中文文章该列恒空，
 		// 若纳入条件会导致中文文章永久留在队列中被反复重新分析（无限循环）
+		// 失败计数与未处理路径对齐：≥3 次停止重试（软死信，保留 keywords 标签不覆盖），
+		// 由定时复活任务或手动重置统一捞回
 		whereClause = `(is_ad = 0 OR is_ad IS NULL)
 		  AND (keywords IS NOT NULL AND keywords != '' AND keywords != '[]')
+		  AND (process_attempts IS NULL OR process_attempts < 3)
 		  AND (
 		    (entities IS NULL OR entities = '')
 		    OR (one_line_summary IS NULL OR one_line_summary = '')
@@ -560,7 +563,10 @@ func (d *DB) UpdateArticleSummaryEmbedding(id int64, summaryEmbedding []byte) er
 // MaxProcessAttempts 最大处理尝试次数
 const MaxProcessAttempts = 3
 
-// IncrementProcessAttempts 递增文章处理失败计数，超过最大次数则标记为已处理
+// IncrementProcessAttempts 递增文章处理失败计数，超过最大次数则标记为已处理。
+// 仅对 keywords 为空的文章（未处理路径）写入 '处理失败' 标记；
+// 已有真实标签的半成品文章（incomplete 路径）不覆盖标签，靠查询条件 attempts < 3 出队（软死信）。
+// 两类失败文章均由 resetFailedArticles（定时复活/手动重置）统一捞回
 func (d *DB) IncrementProcessAttempts(id int64, errMsg string) {
 	_, err := d.db.Exec(`
 		UPDATE articles
@@ -591,15 +597,33 @@ func (d *DB) ResetArticleProcess(id int64) error {
 	return err
 }
 
-// ResetFailedArticles 批量重置所有「处理失败」文章（重新进入处理队列），返回重置数量
+// ResetFailedArticles 批量重置所有失败文章（重新进入处理队列），返回重置数量。
+// 失败文章统一按 process_attempts >= MaxProcessAttempts 判定：
+// 含 keywords='处理失败' 的死信（未处理路径标记）与 keywords 仍为真实标签的软死信（incomplete 路径不标记）。
+// keywords 仅在为 '处理失败' 时清空，真实标签保留
 func (d *DB) ResetFailedArticles() (int64, error) {
+	return d.resetFailedArticles(-1) // limit -1 = SQLite 不限数量
+}
+
+// ResetFailedArticlesLimited 限量重置最早的失败文章（定时复活任务用），返回重置数量。
+// 每次只放回 limit 篇，避免 LLM 长时间故障后大量死信一次性涌入队列
+func (d *DB) ResetFailedArticlesLimited(limit int) (int64, error) {
+	return d.resetFailedArticles(int64(limit))
+}
+
+func (d *DB) resetFailedArticles(limit int64) (int64, error) {
 	result, err := d.db.Exec(`
 		UPDATE articles
 		SET process_attempts = 0,
 		    process_error = NULL,
-		    keywords = ''
-		WHERE keywords = '处理失败'
-	`)
+		    keywords = CASE WHEN keywords = '处理失败' THEN '' ELSE keywords END
+		WHERE id IN (
+			SELECT id FROM articles
+			WHERE COALESCE(process_attempts, 0) >= ?
+			ORDER BY fetched_at ASC
+			LIMIT ?
+		)
+	`, MaxProcessAttempts, limit)
 	if err != nil {
 		return 0, err
 	}
