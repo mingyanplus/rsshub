@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"rss-ai/internal/config"
 )
 
 // EmailSender 邮件发送器
@@ -96,6 +98,7 @@ func (s *GotifySender) Send(msg *Message) *Result {
 		return &Result{Success: false, Error: err.Error()}
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", config.DefaultUserAgent)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -143,6 +146,7 @@ func (s *QQBotSender) getAccessToken() (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", config.DefaultUserAgent)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -207,6 +211,7 @@ func (s *QQBotSender) Send(msg *Message) *Result {
 		return &Result{Success: false, Error: err.Error()}
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", config.DefaultUserAgent)
 	req.Header.Set("Authorization", "QQBot "+token)
 
 	resp, err := s.client.Do(req)
@@ -289,6 +294,7 @@ func (s *DingTalkSender) Send(msg *Message) *Result {
 		return &Result{Success: false, Error: err.Error()}
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", config.DefaultUserAgent)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -352,6 +358,7 @@ func (s *WebhookSender) Send(msg *Message) *Result {
 		return &Result{Success: false, Error: err.Error()}
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", config.DefaultUserAgent)
 
 	for key, value := range s.config.Headers {
 		req.Header.Set(key, value)

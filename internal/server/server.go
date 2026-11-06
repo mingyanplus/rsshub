@@ -3403,15 +3403,20 @@ func SaveSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // configuredUserAgent 返回设置页临时请求应继承的自定义 User-Agent
-// （配置在 config.yaml，设置表单无此字段）：embedding 用 Embedding 的，其余用 LLM 的
+// （配置在 config.yaml，设置表单无此字段）：embedding 用 Embedding 的，其余用 LLM 的；
+// 未配置时回退项目组合 UA，与正式请求的 LLM/Embedding 客户端行为一致
 func configuredUserAgent(target string) string {
 	if appConfig == nil {
 		return ""
 	}
+	ua := appConfig.AI.LLM.UserAgent
 	if target == "embedding" {
-		return appConfig.AI.Embedding.UserAgent
+		ua = appConfig.AI.Embedding.UserAgent
 	}
-	return appConfig.AI.LLM.UserAgent
+	if ua == "" {
+		return config.DefaultUserAgent
+	}
+	return ua
 }
 
 // FetchModels 拉取 LLM / Embedding 服务的模型列表（用表单草稿值，无需先保存）
@@ -3444,7 +3449,7 @@ func FetchModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
-	// 继承配置里的自定义 User-Agent（表单无此字段；显式非空才设置，空值会抑制 Go 默认 UA）
+	// 继承配置里的自定义 User-Agent（表单无此字段；未配置时回退项目组合 UA，与正式请求一致）
 	if ua := configuredUserAgent(req.Target); ua != "" {
 		httpReq.Header.Set("User-Agent", ua)
 	}

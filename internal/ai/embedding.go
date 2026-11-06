@@ -125,9 +125,12 @@ func (c *EmbeddingClient) GetEmbedding(ctx context.Context, text string) ([]floa
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
+	// 配置的 user_agent 优先；未配置时用项目组合 UA，避免 Go 默认 UA
+	ua := c.userAgent
+	if ua == "" {
+		ua = config.DefaultUserAgent
 	}
+	req.Header.Set("User-Agent", ua)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

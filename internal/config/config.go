@@ -112,6 +112,11 @@ type DatabaseConfig struct {
 	Path string `mapstructure:"path"`
 }
 
+// DefaultUserAgent 出站请求的默认 User-Agent：Chrome 浏览器指纹 + 项目标识。
+// 配置了 user_agent（LLM/Embedding）时配置优先；未配置（含推送等无配置项的请求）使用此默认，
+// 避免 Go 默认的 "Go-http-client/1.1" 暴露爬虫身份
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 RSS-AI/1.0"
+
 // AIConfig AI 服务配置
 type AIConfig struct {
 	LLM           LLMConfig      `mapstructure:"llm"`
