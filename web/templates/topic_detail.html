@@ -66,7 +66,8 @@
             <div class="border-l border-gray-200 ml-1.5 pl-6 space-y-5">
                 {{range .RelatedTopics}}
                 <a href="/topics/{{.ID}}" class="relative block group">
-                    <span class="absolute -left-[31px] top-1 w-2.5 h-2.5 rounded-full border-2 border-white bg-gray-300 group-hover:bg-blue-500 transition-colors"></span>
+                    <!-- 圆点与标题首行文字的视觉中心齐平：实测标题首行中心距块顶 35px，圆点半径 5px → top 30px -->
+                    <span class="absolute -left-[31px] top-[30px] w-2.5 h-2.5 rounded-full border-2 border-white bg-gray-300 group-hover:bg-blue-500 transition-colors"></span>
                     <span class="text-xs text-gray-400 tabular-nums">{{if .FirstArticleAt.IsZero}}—{{else}}{{.FirstArticleAt.Format "2006-01-02"}}{{end}}</span>
                     <span class="block text-sm text-gray-700 group-hover:text-blue-600 leading-snug mt-0.5">{{.Title}}</span>
                     <span class="text-xs text-gray-300 mt-0.5">{{.ArticleCount}} 篇</span>
