@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}} - AI Reader</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <script src="/static/js/tailwind.min.js"></script>
     <script src="/static/js/htmx.min.js"></script>
     <script>
@@ -235,6 +236,24 @@
     <!-- 全局通知区域 -->
     <div id="global-toast" class="fixed bottom-4 right-4 z-50"></div>
 
+    <!-- 全局图片 Lightbox：点击正文图片弹出，支持缩放 / 翻页 / 键盘操作 -->
+    <div id="img-lightbox" class="hidden fixed inset-0 z-[70]">
+        <div class="absolute inset-0 bg-black/85"></div>
+        <div id="lb-stage" class="absolute inset-0 overflow-hidden cursor-grab"></div>
+        <button id="lb-close" aria-label="关闭" title="关闭 (Esc)"
+                class="absolute top-4 right-4 text-white/70 hover:text-white text-3xl px-3 py-1 transition z-10">✕</button>
+        <button id="lb-prev" aria-label="上一张" title="上一张 (←)"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white text-5xl px-3 transition z-10">‹</button>
+        <button id="lb-next" aria-label="下一张" title="下一张 (→)"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white text-5xl px-3 transition z-10">›</button>
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/60 text-white rounded px-4 py-2 text-sm z-10">
+            <span id="lb-count" class="tabular-nums text-white/80"></span>
+            <button id="lb-zoom-out" title="缩小 (-)" class="text-xl px-1.5 hover:text-green-300 transition">−</button>
+            <span id="lb-pct" class="tabular-nums w-12 text-center text-white/80">适应</span>
+            <button id="lb-zoom-in" title="放大 (+)" class="text-xl px-1.5 hover:text-green-300 transition">＋</button>
+        </div>
+    </div>
+
     <script>
         // 移动端侧边栏切换
         const sidebar = document.getElementById('sidebar');
@@ -307,6 +326,150 @@
             setExternalLinksTarget();
         });
         linkObserver.observe(document.body, { childList: true, subtree: true });
+    </script>
+
+    <script>
+    // ===== 全局图片 Lightbox：点击正文图片弹出，支持缩放（按钮/滚轮）、翻页（按钮/←→）、Esc/点空白关闭 =====
+    (function () {
+        const lb = document.getElementById('img-lightbox');
+        if (!lb) return;
+        const stage = document.getElementById('lb-stage');
+        const countEl = document.getElementById('lb-count');
+        const pctEl = document.getElementById('lb-pct');
+        // 图片节点动态创建：静态空 src 会闪断图图标
+        const lbImg = new Image();
+        lbImg.referrerPolicy = 'no-referrer';
+        lbImg.alt = '';
+        lbImg.draggable = false; // 禁用原生拖拽幽灵，平移由自定义逻辑接管
+        lbImg.className = 'max-w-[92vw] max-h-[85vh] rounded shadow-2xl';
+        // 中心定位 + transform 平移：任意缩放级别都可拖动查看
+        lbImg.style.position = 'absolute';
+        lbImg.style.left = '50%';
+        lbImg.style.top = '50%';
+        stage.appendChild(lbImg);
+
+        // 正文图片容器：文章预览 / 关注页预览 / 日报预览 / 话题预览与详情
+        const SCOPE = '#preview-body, .report-content, #topic-preview, #topic-modal-content';
+        const ZOOMS = [0, 0.5, 0.75, 1, 1.5, 2, 3, 5]; // 0 = 适应窗口
+        let list = [], idx = 0, zoom = 0, tx = 0, ty = 0;
+
+        function render() {
+            if (zoom === 0) {
+                // 适应窗口：双 max 约束保持比例缩放
+                lbImg.style.width = '';
+                lbImg.style.maxWidth = '';
+                lbImg.style.maxHeight = '';
+                pctEl.textContent = '适应';
+            } else {
+                // 固定倍率：必须解除 max-w/max-h，否则宽高一方被 clamp 会拉变形
+                lbImg.style.maxWidth = 'none';
+                lbImg.style.maxHeight = 'none';
+                lbImg.style.width = (lbImg.naturalWidth * ZOOMS[zoom]) + 'px';
+                pctEl.textContent = Math.round(ZOOMS[zoom] * 100) + '%';
+            }
+            lbImg.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px))`;
+        }
+        function show(i) {
+            if (!list.length) return;
+            idx = (i + list.length) % list.length;
+            zoom = 0;
+            tx = 0;
+            ty = 0;
+            lbImg.src = list[idx];
+            render();
+            countEl.textContent = (idx + 1) + ' / ' + list.length;
+        }
+        function open(scope, clicked) {
+            list = Array.from(scope.querySelectorAll('img'))
+                .map(im => im.currentSrc || im.src).filter(Boolean);
+            if (!list.length) return;
+            lb.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+            const at = list.indexOf(clicked.currentSrc || clicked.src);
+            show(at < 0 ? 0 : at);
+        }
+        function close() {
+            lb.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+            lbImg.removeAttribute('src');
+        }
+
+        // 捕获阶段拦截，先于正文里其他点击行为（如话题链接切换）生效
+        document.addEventListener('click', (e) => {
+            const t = e.target;
+            if (!t || t.tagName !== 'IMG' || t.closest('#img-lightbox')) return;
+            const scope = t.closest(SCOPE);
+            if (!scope) return;
+            e.preventDefault();
+            e.stopPropagation();
+            open(scope, t);
+        }, true);
+
+        document.getElementById('lb-close').addEventListener('click', close);
+        document.getElementById('lb-prev').addEventListener('click', () => show(idx - 1));
+        document.getElementById('lb-next').addEventListener('click', () => show(idx + 1));
+        document.getElementById('lb-zoom-in').addEventListener('click', () => { if (zoom < ZOOMS.length - 1) { zoom++; render(); } });
+        document.getElementById('lb-zoom-out').addEventListener('click', () => { if (zoom > 0) { zoom--; render(); } });
+
+        // 拖拽平移：按下即拖（图片与空白处均可），松手时未移动过的空白点击才关闭
+        let dragging = false, moved = false, sx = 0, sy = 0, stx = 0, sty = 0;
+        stage.addEventListener('mousedown', (e) => {
+            dragging = true;
+            moved = false;
+            sx = e.clientX;
+            sy = e.clientY;
+            stx = tx;
+            sty = ty;
+            stage.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            const dx = e.clientX - sx, dy = e.clientY - sy;
+            if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+            tx = stx + dx;
+            ty = sty + dy;
+            render();
+        });
+        window.addEventListener('mouseup', () => {
+            dragging = false;
+            stage.style.cursor = 'grab';
+        });
+        stage.addEventListener('click', (e) => { if (e.target === stage && !moved) close(); });
+        // 触摸平移（单指）
+        stage.addEventListener('touchstart', (e) => {
+            dragging = true;
+            moved = false;
+            sx = e.touches[0].clientX;
+            sy = e.touches[0].clientY;
+            stx = tx;
+            sty = ty;
+        }, { passive: true });
+        stage.addEventListener('touchmove', (e) => {
+            if (!dragging) return;
+            e.preventDefault();
+            const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
+            if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+            tx = stx + dx;
+            ty = sty + dy;
+            render();
+        }, { passive: false });
+        stage.addEventListener('touchend', () => { dragging = false; });
+
+        lb.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (e.deltaY < 0 && zoom < ZOOMS.length - 1) zoom++;
+            else if (e.deltaY > 0 && zoom > 0) zoom--;
+            render();
+        }, { passive: false });
+        // 缩放状态下切换图片，待加载完成后按新图 naturalWidth 重算
+        lbImg.addEventListener('load', () => { if (zoom !== 0) render(); });
+        document.addEventListener('keydown', (e) => {
+            if (lb.classList.contains('hidden')) return;
+            if (e.key === 'Escape') close();
+            else if (e.key === 'ArrowLeft') show(idx - 1);
+            else if (e.key === 'ArrowRight') show(idx + 1);
+        });
+    })();
     </script>
 </body>
 </html>

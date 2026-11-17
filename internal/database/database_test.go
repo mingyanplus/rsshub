@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -476,4 +477,38 @@ func TestResetFailedArticles(t *testing.T) {
 	check(ids[0], "", 0)    // 最老，被复活
 	check(ids[1], "科技", 3) // 仍在失败态
 	check(ids[3], "处理失败", 3)
+}
+
+// TestForeignKeysOnEveryConnection DSN 里设置的 foreign_keys 必须对池中每个连接生效：
+// 历史缺陷是 Exec PRAGMA 只开在单个连接上，ON DELETE CASCADE 时灵时不灵
+func TestForeignKeysOnEveryConnection(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "rss_test*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Close()
+
+	db, err := New(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		conn, err := db.SQL().Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fk int
+		if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk); err != nil {
+			conn.Close()
+			t.Fatal(err)
+		}
+		conn.Close()
+		if fk != 1 {
+			t.Fatalf("connection %d: PRAGMA foreign_keys = %d, want 1", i, fk)
+		}
+	}
 }

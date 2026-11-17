@@ -191,6 +191,7 @@
                                 <h4 class="font-medium text-gray-900 truncate text-sm">{{.Name}}</h4>
                                 <p class="text-xs text-gray-400">{{.CreatedAt}}</p>
                             </div>
+                            {{if $.IsAdmin}}<button onclick="event.stopPropagation(); deleteReport({{.ID}})" title="删除此报告" class="flex-shrink-0 text-gray-300 hover:text-red-500 transition p-1">🗑</button>{{end}}
                         </div>
                         <p class="text-xs text-gray-500 line-clamp-2 mb-2">{{.Summary}}</p>
                         <div class="flex items-center gap-2 text-xs text-gray-400">
@@ -434,5 +435,22 @@ document.body.addEventListener('htmx:afterRequest', function(evt) {
         }
     }
 });
+// 删除报告（管理员）：删除后从列表移除，并复位右侧预览
+async function deleteReport(id) {
+    if (!confirm('确定删除这份报告吗？推送记录一并删除，不可恢复。')) return;
+    try {
+        const res = await fetch('/api/reports/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const item = document.querySelector(`.report-item[data-id="${id}"]`);
+        if (item) item.remove();
+        if (selectedReportId === id) {
+            selectedReportId = null;
+            document.getElementById('preview-content').classList.add('hidden');
+            document.getElementById('preview-empty').classList.remove('hidden');
+        }
+    } catch (err) {
+        alert('删除失败：' + err.message);
+    }
+}
 </script>
 {{end}}

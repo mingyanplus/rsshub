@@ -23,11 +23,7 @@ func New(path string) (*DB, error) {
 		return nil, fmt.Errorf("failed to set WAL mode: %w", err)
 	}
 
-	// 启用 SQLite 外键约束（默认关闭），使 ON DELETE CASCADE 生效
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
-	}
+	// 外键约束经 DSN 对池内每个连接开启（见 driver_*.go），ON DELETE CASCADE 可靠生效
 
 	d := &DB{db: db}
 
@@ -42,6 +38,9 @@ func New(path string) (*DB, error) {
 
 	// 清除存量标题/摘要中的 Markdown 加粗定界符（LLM 偶发输出，界面按纯文本展示）
 	d.stripMarkdownEmphasisInDB()
+
+	// 清理外键级联失效时期残留的孤儿行（见 orphan_clean.go）
+	d.deleteOrphanRows()
 
 	return d, nil
 }

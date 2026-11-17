@@ -270,8 +270,11 @@ func TestFetchModels(t *testing.T) {
 	}
 
 	// 缺参数
-	resp2, _ := http.Post(ts.URL+"/api/settings/models", "application/json",
+	resp2, err := http.Post(ts.URL+"/api/settings/models", "application/json",
 		strings.NewReader(`{"base_url":""}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp2.StatusCode)

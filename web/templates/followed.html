@@ -4,7 +4,7 @@
 .article-card.read {
     opacity: 0.55;
 }
-.article-card.read h2 {
+.article-card.read .card-title {
     font-weight: 400;
     color: #78716c;
 }
@@ -237,7 +237,7 @@ function createArticleCard(article) {
     <article class="article-card ${readClass} bg-white rounded-xl shadow-sm border border-gray-100 p-4 cursor-pointer transition hover:border-gray-300"
              data-article-id="${article.id}"
              onclick="selectArticle(${article.id}, this)">
-        <h2 class="text-[15px] font-semibold text-gray-900 leading-snug">${escapeHtml(article.title)}</h2>
+        <p class="card-title text-[15px] font-semibold text-gray-900 leading-snug">${escapeHtml(article.title)}</p>
         <p class="text-sm text-gray-600 mt-2 leading-6 line-clamp-2">${escapeHtml(summary)}</p>
         <div class="flex items-center gap-2 text-xs text-gray-400 mt-2 flex-wrap">
             <span class="truncate max-w-[180px]">📰 ${escapeHtml(article.feed_name || '')}</span>

@@ -394,6 +394,7 @@ func NewRouter() *Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(middleware.Compress(5)) // gzip 压缩文本响应（静态 JS/页面/接口 JSON），外网慢链路首次加载体积降约 80%
 	r.Use(AuthMiddleware) // 登录校验（server.password 留空则不生效）
 
 	// 登录/登出
@@ -533,6 +534,7 @@ func NewRouter() *Router {
 			r.Post("/reports/generate", GenerateReport)
 			r.Post("/reports/resend", ResendReport)
 			r.Post("/reports/config", UpdateReportConfig)
+			r.Delete("/reports/{id}", DeleteReport)
 
 			// 数据管理
 			r.Post("/data/export", ExportData)
@@ -583,10 +585,18 @@ func NewRouter() *Router {
 		})
 	})
 
-	// 静态文件服务
-	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	// 静态文件服务（带 1 天客户端缓存，到期后按 Last-Modified 协商更新）
+	r.Handle("/static/*", staticWithCache(http.StripPrefix("/static/", http.FileServer(http.Dir("web/static")))))
 
 	return &Router{mux: r}
+}
+
+// staticWithCache 给静态文件响应补 Cache-Control 头（原 FileServer 只发 Last-Modified）
+func staticWithCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ServeHTTP 实现 http.Handler 接口
@@ -5776,6 +5786,28 @@ func ResendReport(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "resending"})
+}
+
+// DeleteReport 删除报告（管理员，物理删除报告及其关联的推送记录、报告-文章关联）
+func DeleteReport(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid report ID", http.StatusBadRequest)
+		return
+	}
+
+	if appDB == nil {
+		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	if err := appDB.DeleteReport(id); err != nil {
+		http.Error(w, "Failed to delete report: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // UpdateReportConfig 更新报告配置

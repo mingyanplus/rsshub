@@ -1053,10 +1053,23 @@ func (d *DB) UpdateReport(report *models.Report) error {
 	return err
 }
 
-// DeleteReport 删除报告
+// DeleteReport 删除报告（显式清理关联行：外键 PRAGMA 按连接生效、池化连接不可靠，notifications 本就无外键）
 func (d *DB) DeleteReport(id int64) error {
-	_, err := d.db.Exec(`DELETE FROM reports WHERE id = ?`, id)
-	return err
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`DELETE FROM notifications WHERE report_id = ?`,
+		`DELETE FROM report_articles WHERE report_id = ?`,
+		`DELETE FROM reports WHERE id = ?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // GetStats 获取统计数据
