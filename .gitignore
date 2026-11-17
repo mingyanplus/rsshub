@@ -10,6 +10,7 @@ config.yaml
 # 工具目录
 .claude/
 .playwright-mcp/
+.impeccable/
 
 # 开发过程文档（编程计划/superpowers）
 docs/
