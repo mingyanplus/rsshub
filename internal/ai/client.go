@@ -351,6 +351,12 @@ func (c *LLMClient) doChatRequestWithThinking(ctx context.Context, system, promp
 		return "", fmt.Errorf("empty response from API")
 	}
 
+	// 截断的响应（max_tokens 用尽）交回去必然解析失败，按错误处理走重试，
+	// 也避免半截 JSON 以"成功"身份写入 LLM 缓存
+	if chatResp.Choices[0].FinishReason == "length" {
+		return "", fmt.Errorf("LLM 响应被截断 (finish_reason=length, completion_tokens=%d)", chatResp.Usage.CompletionTokens)
+	}
+
 	log.Printf("DEBUG: LLM 响应长度: %d chars, tokens: prompt=%d completion=%d",
 		len(result), chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens)
 	return result, nil

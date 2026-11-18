@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -202,6 +203,98 @@ func TestParseAnalyzeResponseUnescapedQuotes(t *testing.T) {
 	}
 }
 
+// 2026-11-18 线上 5 条解析失败的真实样例（浓缩），四种畸形逐一复现：
+// 38034 裸引号+非法转义 \ 、38124 裸引号后跟 ASCII 逗号、39083 值后全角逗号分隔符、39328 裸反斜杠 \sigma
+func TestParseAnalyzeResponseMalformedVariants(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		check func(*AnalyzeResult) error
+	}{
+		{
+			name: "裸引号加非法转义_反斜杠空格",
+			json: `{
+  "is_ad": false,
+  "content_cleaned": "微软已推送重新设计的"运行"窗口，采用 WinUI 3 构建，并支持输入 ~\ 快速进入用户文件夹。",
+  "summary": "微软将推出新版运行窗口。",
+  "keywords": ["Windows 11", "运行窗口"],
+  "tags": ["操作系统"],
+  "importance_score": 7
+}`,
+			check: func(r *AnalyzeResult) error {
+				if !strings.Contains(r.ContentCleaned, `设计的"运行"窗口`) {
+					return fmt.Errorf("ContentCleaned 缺少内嵌引号原文: %q", r.ContentCleaned)
+				}
+				if !strings.Contains(r.ContentCleaned, `~\ 快速进入`) {
+					return fmt.Errorf("ContentCleaned 缺少字面反斜杠: %q", r.ContentCleaned)
+				}
+				return nil
+			},
+		},
+		{
+			name: "裸引号后跟ASCII逗号",
+			json: `{
+  "is_ad": false,
+  "content_cleaned": "微软起初将原因归结为多个地区基础设施上的 " 负载升高 ", 随后暂停了部署。大家又都拿起了电话, 聊天群也比平时更忙了。",
+  "summary": "微软服务故障重创金融业。",
+  "keywords": ["微软服务故障"],
+  "importance_score": 7
+}`,
+			check: func(r *AnalyzeResult) error {
+				if !strings.Contains(r.ContentCleaned, `" 负载升高 ", 随后暂停了部署`) {
+					return fmt.Errorf("ContentCleaned 内嵌引号+逗号原文丢失: %q", r.ContentCleaned)
+				}
+				return nil
+			},
+		},
+		{
+			name: "值结束后全角逗号当分隔符",
+			json: `{
+  "is_ad": false,
+  "content_cleaned": "这届网友爱上了新的解压神器，这就是最近走红的"脆皮捏捏"，外脆内软的反差带来奇妙体验。",
+  "summary": "脆皮捏捏成为解压新宠。"，
+  "keywords": ["脆皮捏捏", "解压玩具"],
+  "importance_score": 6
+}`,
+			check: func(r *AnalyzeResult) error {
+				if r.Summary != "脆皮捏捏成为解压新宠。" {
+					return fmt.Errorf("Summary = %q", r.Summary)
+				}
+				if len(r.Keywords) != 2 {
+					return fmt.Errorf("Keywords = %v, want 2 个", r.Keywords)
+				}
+				return nil
+			},
+		},
+		{
+			name: "正文裸反斜杠_非法转义",
+			json: `{
+  "is_ad": false,
+  "content_cleaned": "概率论从最基本的测度论讲起，如\sigma代数、Borel\sigma-代数、Lebesgue测度。",
+  "summary": "国内外概率论课程设置存在差异。",
+  "keywords": ["概率论", "测度论"],
+  "importance_score": 7
+}`,
+			check: func(r *AnalyzeResult) error {
+				if !strings.Contains(r.ContentCleaned, `\sigma代数`) {
+					return fmt.Errorf("ContentCleaned 缺少字面 \\sigma: %q", r.ContentCleaned)
+				}
+				return nil
+			},
+		},
+	}
+	for _, tc := range cases {
+		result, err := ParseAnalyzeResponse(tc.json)
+		if err != nil {
+			t.Errorf("%s: ParseAnalyzeResponse() error = %v", tc.name, err)
+			continue
+		}
+		if err := tc.check(result); err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+	}
+}
+
 func TestCalculateCosineSimilarity(t *testing.T) {
 	// 相同向量，相似度应为 1.0
 	vec1 := []float32{1.0, 0.0, 0.0}
@@ -228,6 +321,33 @@ func TestCalculateCosineSimilarity(t *testing.T) {
 	similarity = CalculateCosineSimilarity(vec5, vec6)
 	if similarity != -1.0 {
 		t.Errorf("Similarity = %v, want -1.0", similarity)
+	}
+}
+
+// 截断响应（finish_reason=length）必须按错误处理走重试，不能把半截 JSON 当成功返回并写入缓存
+func TestChatRejectsTruncatedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]string{"role": "assistant", "content": `{"summary": "半截`},
+					"finish_reason": "length",
+				},
+			},
+			"usage": map[string]int{"completion_tokens": 1024},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewLLMClient(&config.LLMConfig{
+		BaseURL: srv.URL, APIKey: "k", Model: "m", Timeout: 5 * time.Second, MaxRetries: 1,
+	})
+	_, err := c.Chat(context.Background(), "hi")
+	if err == nil {
+		t.Fatal("Chat() should fail on truncated response (finish_reason=length)")
+	}
+	if !strings.Contains(err.Error(), "截断") {
+		t.Errorf("err = %v, want 包含「截断」", err)
 	}
 }
 

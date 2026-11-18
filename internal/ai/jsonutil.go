@@ -81,53 +81,139 @@ func balancedJSONObjectEnd(s string) int {
 	return -1
 }
 
-// UnmarshalLenient 解析 JSON；失败时修复字符串值内未转义引号后重试，
+// UnmarshalLenient 解析 JSON；失败时修复 LLM 输出中的常见畸形后重试，
 // 修复仍失败则返回原始错误（失败模式与严格解析一致，不引入回归）。
 func UnmarshalLenient(data []byte, v any) error {
 	if err := json.Unmarshal(data, v); err != nil {
-		if err2 := json.Unmarshal([]byte(RepairUnescapedQuotes(string(data))), v); err2 != nil {
+		if err2 := json.Unmarshal([]byte(repairLLMJSON(string(data))), v); err2 != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// RepairUnescapedQuotes 修复 JSON 字符串值内未转义的双引号。
-// LLM 偶发在文本值里输出裸引号（如 首款"中折叠"手机），使字符串提前结束，
-// json.Unmarshal 报 "invalid character ... after object key:value pair"。
-// 判定：字符串内遇到引号时，向后跳过空白看第一个字符，
-// 不是 , } ] :（key/值结束后的合法结构字符）则视为内嵌引号并转义。
-func RepairUnescapedQuotes(s string) string {
-	var b strings.Builder
-	b.Grow(len(s) + 16)
-	inString := false
+func isHex4(s string) bool {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if !inString {
-			if c == '"' {
-				inString = true
-			}
-			b.WriteByte(c)
-			continue
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
 		}
-		if c == '\\' && i+1 < len(s) { // 转义序列原样保留；末尾孤立 \ 走兜底写入
-			b.WriteByte(c)
+	}
+	return len(s) == 4
+}
+
+// repairLLMJSON 修复 LLM 输出 JSON 中的常见畸形（仅在严格解析失败后兜底）：
+//  1. 字符串值内未转义的双引号（如 首款"中折叠"手机）——转义为 \"
+//  2. 值内非法转义序列（如正文里的 \sigma、路径 ~\ ）——补成 \\X，解码后为字面反斜杠
+//  3. 值结束后全角逗号"，"误作键值分隔符（如 "summary": "xx"，）——归一为 ASCII 逗号
+//
+// 判定引号是否真结束不能只看下一个字符：值内会出现 `升高 ", 随后` 这类
+// 「内嵌引号 + ASCII 逗号」，须前瞻逗号后的非空白字符（必须是下个键的引号
+// 或对象收尾才算真结束）。键串以 : 收尾、数组元素串以 , ] 收尾，分别判定。
+func repairLLMJSON(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+
+	inString := false
+	isKey := false   // 当前字符串是对象键（: 收尾）还是值（, } 收尾）
+	var stack []byte // '{' 或 '[' 嵌套栈：栈顶为 [ 时字符串是数组元素
+	var lastSig byte // 最近写出的结构性字符（{ [ : , } ]），用于区分键/值
+
+	skipWS := func(i int) int {
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
 			i++
-			b.WriteByte(s[i])
+		}
+		return i
+	}
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if c == '\\' && i+1 < len(s) {
+				next := s[i+1]
+				switch next {
+				case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+					b.WriteByte(c)
+					i++
+					b.WriteByte(next)
+				case 'u':
+					if i+6 <= len(s) && isHex4(s[i+2:i+6]) {
+						b.WriteString(s[i : i+6])
+						i += 5
+					} else {
+						b.WriteString(`\\`)
+						i++
+						b.WriteByte(next)
+					}
+				default:
+					// 非法转义（\s、\<空格> 等）：补成 \\X，保留字面反斜杠
+					b.WriteString(`\\`)
+					i++
+					b.WriteByte(next)
+				}
+				continue
+			}
+			if c == '"' {
+				// 前瞻判定真结束
+				j := skipWS(i + 1)
+				terminated := false
+				switch {
+				case j >= len(s):
+					terminated = true
+				case isKey:
+					terminated = s[j] == ':'
+				case len(stack) > 0 && stack[len(stack)-1] == '[':
+					terminated = s[j] == ',' || s[j] == ']'
+				default: // 对象值
+					switch s[j] {
+					case ',', '}', ']':
+						k := skipWS(j + 1)
+						terminated = s[j] != ',' || k >= len(s) || s[k] == '"' || s[k] == '}'
+					case 0xEF:
+						// 全角逗号"，"(U+FF0C, EF BC 8C) 误作分隔符：
+						// 后随下个键或对象收尾才算真结束并替换为 ASCII 逗号
+						if j+2 < len(s) && s[j+1] == 0xBC && s[j+2] == 0x8C {
+							k := skipWS(j + 3)
+							if k < len(s) && (s[k] == '"' || s[k] == '}') {
+								b.WriteByte('"')
+								inString = false
+								b.WriteByte(',')
+								lastSig = ',' // 合成逗号绕过了外层 switch，须手动记录
+								i = j + 2     // 主循环 i++ 跳过全角逗号最后一字节
+								continue
+							}
+						}
+					}
+				}
+				if terminated {
+					b.WriteByte(c)
+					inString = false
+				} else {
+					b.WriteString(`\"`)
+				}
+				continue
+			}
+			b.WriteByte(c)
 			continue
 		}
-		if c == '"' {
-			j := i + 1
-			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') {
-				j++
+
+		switch c {
+		case '"':
+			inString = true
+			isKey = (lastSig == ',' || lastSig == '{')
+			if len(stack) > 0 && stack[len(stack)-1] == '[' {
+				isKey = false
 			}
-			if j >= len(s) || s[j] == ',' || s[j] == '}' || s[j] == ']' || s[j] == ':' {
-				inString = false
-				b.WriteByte(c)
-			} else {
-				b.WriteString(`\"`)
+		case '{', '[':
+			stack = append(stack, c)
+			lastSig = c
+		case '}', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
 			}
-			continue
+			lastSig = c
+		case ':', ',':
+			lastSig = c
 		}
 		b.WriteByte(c)
 	}

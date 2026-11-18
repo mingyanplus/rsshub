@@ -172,6 +172,10 @@ func (a *Analyzer) AnalyzeArticle(ctx context.Context, title, content string) (*
 
 	analyzeResult, err := ParseAnalyzeResponse(result)
 	if err != nil {
+		// 原始响应已被 CachedCall 按"成功"写入缓存，不清除的话积压重试会一直命中坏数据
+		if err := a.cache.Invalidate(analyzeKey); err != nil {
+			log.Printf("清除 LLM 缓存失败: %v", err)
+		}
 		return nil, fmt.Errorf("failed to parse analyze response: %w", err)
 	}
 
